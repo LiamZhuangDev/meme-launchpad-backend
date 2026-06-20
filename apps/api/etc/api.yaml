@@ -1,0 +1,57 @@
+Name: meme-api
+Host: 0.0.0.0
+Port: 38080
+
+Log:
+  Level: info
+  Mode: console
+
+# Copy this file to api.local.yaml and replace placeholders before running locally.
+Auth:
+  AccessSecret: change-me-in-api.local.yaml
+  AccessExpire: 86400
+  RefreshExpire: 604800
+
+Database:
+  Host: localhost
+  Port: 5432
+  User: postgres
+  Password: change-me-in-api.local.yaml
+  Name: metaland
+  SSLMode: disable
+  MaxOpenConns: 50
+  MaxIdleConns: 10
+
+Redis:
+  Host: localhost:6379
+  Pass: ""
+  DB: 0
+
+Chain:
+  Name: BSC Testnet
+  ChainID: 97
+  RPC: https://replace-with-your-rpc-url
+  CoreContract: "0x69207F321CFDfd30D73D1d9278e4132E15080ec9"
+  FactoryContract: "0x7A24756A156DE5752a2d91d494D2D4FdCc9fc18F"
+  HelperContract: "0xbdBA43Fa0DF71724E5fF171eD3F4781ece0c141A"
+  VestingContract: "0x99Cd9cA83277338583F40d6b689c0aA5E20baCAD"
+  TokenBytecode: ""
+
+Storage:
+  Type: s3
+  Bucket: replace-with-your-bucket
+  Region: ap-southeast-1
+  AccessKey: ""
+  SecretKey: ""
+  Endpoint: ""
+  CDNDomain: ""
+
+SignerPrivateKey: ""
+
+Cos:
+  SecretID: ""
+  SecretKey: ""
+  Bucket: ""
+  Region: ""
+  AppID: ""
+  Domain: ""

@@ -1,0 +1,12 @@
+# Developer-local configuration and secrets
+.env
+.env.*
+!*.example
+apps/api/etc/api.local.yaml
+apps/indexer/config/config.local.yaml
+
+# Generated Go binaries
+apps/api/api-server
+apps/api/build/
+apps/indexer/build/
+app-rebuild/bin/
