@@ -6,24 +6,26 @@ import (
 	"net/http"
 )
 
-// NewHandler returns the complete HTTP surface implemented in Step 1.
+// NewHandler returns the complete HTTP surface implemented so far.
 // Future steps will add routes here, while keeping main.go focused on process
 // startup and shutdown.
-func NewHandler() http.Handler {
+func NewHandler(serviceName string) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", health)
+	mux.HandleFunc("/healthz", health(serviceName))
 	return mux
 }
 
-func health(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func health(serviceName string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"service": "meme-launchpad-rebuild-api",
-		"status":  "ok",
-	})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"service": serviceName,
+			"status":  "ok",
+		})
+	}
 }

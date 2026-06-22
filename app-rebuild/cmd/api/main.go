@@ -10,23 +10,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
+	"github.com/meme-launchpad/app-rebuild/internal/app"
+	"github.com/meme-launchpad/app-rebuild/internal/config"
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "38081"
+	cfg, err := config.Load(os.LookupEnv)
+	if err != nil {
+		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	server := &http.Server{
-		Addr:              ":" + port,
-		Handler:           httpapi.NewHandler(),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	application := app.New(cfg)
+	server := application.HTTPServer()
 
 	go func() {
-		log.Printf("rebuild API listening on http://localhost:%s", port)
+		log.Printf("%s listening on http://localhost:%d", cfg.ServiceName, cfg.HTTP.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("API server failed: %v", err)
 		}
