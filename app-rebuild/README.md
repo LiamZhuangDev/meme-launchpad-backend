@@ -11,7 +11,7 @@ The original backend is not imported or modified by this project.
 
 - [x] Step 1 — runnable HTTP foundation and health endpoint
 - [x] Step 2 — configuration and application dependencies
-- [ ] Step 3 — PostgreSQL connection and first `users` repository
+- [x] Step 3 — PostgreSQL connection and first `users` repository
 - [ ] Step 4 — wallet-signature login and JWT authentication
 - [ ] Step 5 — token read APIs and database models
 - [ ] Step 6 — token-creation intent, CREATE2 prediction, and signing
@@ -66,5 +66,25 @@ APP_NAME=my-local-api HTTP_PORT=48080 go run ./cmd/api
 curl http://localhost:48080/healthz
 ```
 
-The expected response now contains `my-local-api`. Step 3 will introduce
-PostgreSQL and a small `users` repository.
+The expected response now contains `my-local-api`.
+
+## Step 3: PostgreSQL and the first repository
+
+Step 3 adds a single PostgreSQL pool for the process. `internal/app` creates
+it once, injects it into `UserRepository`, and closes it during shutdown. A
+handler never creates a database connection itself.
+
+Set `DATABASE_URL` to a PostgreSQL connection string. Its safe local default
+is `postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable`.
+Create the `users` table before starting the API:
+
+```bash
+export DATABASE_URL='postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable'
+createdb meme_launchpad
+psql "$DATABASE_URL" -f migrations/001_create_users.sql
+go run ./cmd/api
+```
+
+`UserRepository` currently contains only two operations: `FindByAddress` and
+`Create`. Step 4 will call them after verifying a wallet signature, so this
+step intentionally exposes no user HTTP endpoint yet.

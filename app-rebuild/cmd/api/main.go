@@ -20,7 +20,14 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	application := app.New(cfg)
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer startupCancel()
+
+	application, err := app.New(startupCtx, cfg)
+	if err != nil {
+		log.Fatalf("start application: %v", err)
+	}
+	defer application.Close()
 	server := application.HTTPServer()
 
 	go func() {

@@ -9,10 +9,10 @@ import (
 )
 
 func TestHTTPServerUsesConfiguration(t *testing.T) {
-	application := New(config.Config{
+	application := NewWithPool(config.Config{
 		ServiceName: "test-api",
 		HTTP:        config.HTTPConfig{Port: 48080},
-	})
+	}, nil)
 
 	server := application.HTTPServer()
 	if server.Addr != ":48080" {

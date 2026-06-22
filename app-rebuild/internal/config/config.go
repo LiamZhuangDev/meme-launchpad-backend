@@ -9,6 +9,7 @@ import (
 const (
 	defaultServiceName = "meme-launchpad-rebuild-api"
 	defaultHTTPPort    = 38081
+	defaultDatabaseURL = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
 )
 
 // Config contains only the configuration Step 2 needs. Future steps will add
@@ -16,10 +17,15 @@ const (
 type Config struct {
 	ServiceName string
 	HTTP        HTTPConfig
+	Database    DatabaseConfig
 }
 
 type HTTPConfig struct {
 	Port int
+}
+
+type DatabaseConfig struct {
+	URL string
 }
 
 // LookupEnv matches os.LookupEnv and makes configuration parsing testable
@@ -30,11 +36,15 @@ type LookupEnv func(string) (string, bool)
 //
 // APP_NAME defaults to meme-launchpad-rebuild-api.
 // HTTP_PORT defaults to 38081 and must be a valid TCP port.
+// DATABASE_URL defaults to a local development PostgreSQL database.
 func Load(lookup LookupEnv) (Config, error) {
 	config := Config{
 		ServiceName: defaultServiceName,
 		HTTP: HTTPConfig{
 			Port: defaultHTTPPort,
+		},
+		Database: DatabaseConfig{
+			URL: defaultDatabaseURL,
 		},
 	}
 
@@ -48,6 +58,10 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("HTTP_PORT must be an integer from 1 to 65535")
 		}
 		config.HTTP.Port = port
+	}
+
+	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
+		config.Database.URL = databaseURL
 	}
 
 	return config, nil

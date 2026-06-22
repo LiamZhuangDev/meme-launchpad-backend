@@ -2,22 +2,47 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meme-launchpad/app-rebuild/internal/config"
+	"github.com/meme-launchpad/app-rebuild/internal/database"
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
+	"github.com/meme-launchpad/app-rebuild/internal/repository"
 )
 
 // Application is the dependency container for one API process.
-// Step 3 will add the PostgreSQL dependency here.
 type Application struct {
 	Config config.Config
+	DB     *pgxpool.Pool
+	Users  *repository.UserRepository
 }
 
-func New(cfg config.Config) *Application {
-	return &Application{Config: cfg}
+// New opens the process-wide PostgreSQL pool and wires repositories to it.
+func New(ctx context.Context, cfg config.Config) (*Application, error) {
+	pool, err := database.Open(ctx, cfg.Database)
+	if err != nil {
+		return nil, err
+	}
+	return NewWithPool(cfg, pool), nil
+}
+
+// NewWithPool is useful for tests and future commands that own an existing pool.
+func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
+	application := &Application{Config: cfg, DB: pool}
+	if pool != nil {
+		application.Users = repository.NewUserRepository(pool)
+	}
+	return application
+}
+
+func (a *Application) Close() {
+	if a.DB != nil {
+		a.DB.Close()
+	}
 }
 
 func (a *Application) HTTPServer() *http.Server {
