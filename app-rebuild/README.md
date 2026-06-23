@@ -93,10 +93,23 @@ step intentionally exposes no user HTTP endpoint yet.
 
 The login flow is now runnable: request a one-time message, sign it in the
 wallet, then send its signature to `POST /api/v1/user/wallet-login`. The server
-recovers the Ethereum address from the personal-signature, consumes the nonce,
-finds or creates the user, and returns a 24-hour JWT. `GET /api/v1/user/me`
-requires that token in `Authorization: Bearer <token>`.
+generates an EIP-4361 Sign-In with Ethereum (SIWE) message, recovers the
+Ethereum address from the ERC-191 personal-signature, consumes the nonce after
+successful verification, finds or creates the user, and returns a 24-hour JWT.
+`GET /api/v1/user/me` requires that token in `Authorization: Bearer <token>`.
+
+The SIWE message binds a login to the domain, request URI, BSC Testnet chain
+ID, random nonce, issued time, and expiry. Configure those relying-party values
+for your deployment:
+
+| Environment variable | Local default |
+| --- | --- |
+| `SIWE_DOMAIN` | `localhost:38081` |
+| `SIWE_URI` | `http://localhost:38081` |
+| `SIWE_CHAIN_ID` | `97` |
 
 Set `JWT_SECRET` outside local development. The in-memory nonce store is only
 for this checkpoint; restarting the API invalidates outstanding messages.
 Step 9 will replace it with Redis so authentication works across processes.
+This checkpoint verifies externally owned accounts (EOAs); contract-wallet
+signatures require ERC-1271 verification, which is outside the current scope.

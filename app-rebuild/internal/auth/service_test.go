@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,11 +29,16 @@ func TestLoginVerifiesWalletSignatureAndConsumesNonce(t *testing.T) {
 		t.Fatalf("GenerateKey() error = %v", err)
 	}
 	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
-	service := New(&fakeUsers{}, "test-secret")
+	service := New(&fakeUsers{}, "test-secret", SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
 
 	challenge, err := service.RequestMessage(address)
 	if err != nil {
 		t.Fatalf("RequestMessage() error = %v", err)
+	}
+	for _, field := range []string{"app.example wants you to sign in with your Ethereum account:", "URI: https://app.example/login", "Version: 1", "Chain ID: 97", "Nonce: " + challenge.Nonce, "Issued At: ", "Expiration Time: "} {
+		if !strings.Contains(challenge.Message, field) {
+			t.Fatalf("SIWE message is missing %q: %s", field, challenge.Message)
+		}
 	}
 	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(challenge.Message))
 	signature, err := ethcrypto.Sign(ethcrypto.Keccak256Hash([]byte(prefix+challenge.Message)).Bytes(), key)

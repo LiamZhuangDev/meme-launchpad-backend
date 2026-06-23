@@ -37,7 +37,7 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 	application := &Application{Config: cfg, DB: pool}
 	if pool != nil {
 		application.Users = repository.NewUserRepository(pool)
-		application.Auth = auth.New(application.Users, cfg.Auth.JWTSecret)
+		application.Auth = auth.New(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE))
 	}
 	return application
 }

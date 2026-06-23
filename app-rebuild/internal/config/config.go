@@ -31,6 +31,13 @@ type DatabaseConfig struct {
 
 type AuthConfig struct {
 	JWTSecret string
+	SIWE      SIWEConfig
+}
+
+type SIWEConfig struct {
+	Domain  string
+	URI     string
+	ChainID int64
 }
 
 // LookupEnv matches os.LookupEnv and makes configuration parsing testable
@@ -51,7 +58,10 @@ func Load(lookup LookupEnv) (Config, error) {
 		Database: DatabaseConfig{
 			URL: defaultDatabaseURL,
 		},
-		Auth: AuthConfig{JWTSecret: "development-only-secret-change-me"},
+		Auth: AuthConfig{
+			JWTSecret: "development-only-secret-change-me",
+			SIWE:      SIWEConfig{Domain: "localhost:38081", URI: "http://localhost:38081", ChainID: 97},
+		},
 	}
 
 	if name, ok := lookup("APP_NAME"); ok && name != "" {
@@ -71,6 +81,19 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if secret, ok := lookup("JWT_SECRET"); ok && secret != "" {
 		config.Auth.JWTSecret = secret
+	}
+	if domain, ok := lookup("SIWE_DOMAIN"); ok && domain != "" {
+		config.Auth.SIWE.Domain = domain
+	}
+	if uri, ok := lookup("SIWE_URI"); ok && uri != "" {
+		config.Auth.SIWE.URI = uri
+	}
+	if rawChainID, ok := lookup("SIWE_CHAIN_ID"); ok && rawChainID != "" {
+		chainID, err := strconv.ParseInt(rawChainID, 10, 64)
+		if err != nil || chainID < 1 {
+			return Config{}, fmt.Errorf("SIWE_CHAIN_ID must be a positive integer")
+		}
+		config.Auth.SIWE.ChainID = chainID
 	}
 
 	return config, nil

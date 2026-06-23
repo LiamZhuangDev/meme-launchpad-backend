@@ -49,20 +49,27 @@ type LoginResult struct {
 }
 
 type nonceEntry struct {
-	value   string
+	message string
 	expires time.Time
+}
+
+type SIWEConfig struct {
+	Domain  string
+	URI     string
+	ChainID int64
 }
 
 // Service uses in-memory nonces until Step 9 replaces this implementation with Redis.
 type Service struct {
 	users  UserStore
 	secret []byte
+	siwe   SIWEConfig
 	nonces map[string]nonceEntry
 	mu     sync.Mutex
 }
 
-func New(users UserStore, jwtSecret string) *Service {
-	return &Service{users: users, secret: []byte(jwtSecret), nonces: make(map[string]nonceEntry)}
+func New(users UserStore, jwtSecret string, siwe SIWEConfig) *Service {
+	return &Service{users: users, secret: []byte(jwtSecret), siwe: siwe, nonces: make(map[string]nonceEntry)}
 }
 
 func (s *Service) RequestMessage(address string) (SignMessage, error) {
@@ -75,11 +82,13 @@ func (s *Service) RequestMessage(address string) (SignMessage, error) {
 		return SignMessage{}, fmt.Errorf("generate nonce: %w", err)
 	}
 	nonce := hex.EncodeToString(nonceBytes)
-	expires := time.Now().Add(5 * time.Minute)
+	issuedAt := time.Now().UTC()
+	expires := issuedAt.Add(5 * time.Minute)
+	message := s.siweMessage(address, nonce, issuedAt, expires)
 	s.mu.Lock()
-	s.nonces[address] = nonceEntry{value: nonce, expires: expires}
+	s.nonces[address] = nonceEntry{message: message, expires: expires}
 	s.mu.Unlock()
-	return SignMessage{Message: loginMessage(address, nonce), Nonce: nonce, Expires: expires.Unix()}, nil
+	return SignMessage{Message: message, Nonce: nonce, Expires: expires.Unix()}, nil
 }
 
 func (s *Service) Login(ctx context.Context, address, signature string) (LoginResult, error) {
@@ -87,12 +96,15 @@ func (s *Service) Login(ctx context.Context, address, signature string) (LoginRe
 	if err != nil {
 		return LoginResult{}, err
 	}
-	nonce, err := s.consumeNonce(address)
+	entry, err := s.getNonce(address)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !verifySignature(address, loginMessage(address, nonce), signature) {
+	if !verifySignature(address, entry.message, signature) {
 		return LoginResult{}, ErrInvalidSignature
+	}
+	if err := s.consumeNonce(address); err != nil {
+		return LoginResult{}, err
 	}
 	user, err := s.users.FindByAddress(ctx, address)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -122,15 +134,25 @@ func (s *Service) ParseToken(raw string) (Claims, error) {
 	return claims, nil
 }
 
-func (s *Service) consumeNonce(address string) (string, error) {
+func (s *Service) getNonce(address string) (nonceEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, ok := s.nonces[address]
-	delete(s.nonces, address)
 	if !ok || time.Now().After(entry.expires) {
-		return "", ErrInvalidNonce
+		return nonceEntry{}, ErrInvalidNonce
 	}
-	return entry.value, nil
+	return entry, nil
+}
+
+func (s *Service) consumeNonce(address string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.nonces[address]
+	if !ok || time.Now().After(entry.expires) {
+		return ErrInvalidNonce
+	}
+	delete(s.nonces, address)
+	return nil
 }
 
 func (s *Service) issueToken(user repository.User) (string, int64, error) {
@@ -144,10 +166,12 @@ func normalizeAddress(address string) (string, error) {
 	if !common.IsHexAddress(address) {
 		return "", ErrInvalidAddress
 	}
-	return strings.ToLower(address), nil
+	return common.HexToAddress(address).Hex(), nil
 }
-func loginMessage(address, nonce string) string {
-	return fmt.Sprintf("MEME Launchpad sign-in\n\nWallet address: %s\nNonce: %s", address, nonce)
+func (s *Service) siweMessage(address, nonce string, issuedAt, expires time.Time) string {
+	return fmt.Sprintf("%s wants you to sign in with your Ethereum account:\n%s\n\nSign in to MEME Launchpad.\n\nURI: %s\nVersion: 1\nChain ID: %d\nNonce: %s\nIssued At: %s\nExpiration Time: %s",
+		s.siwe.Domain, address, s.siwe.URI, s.siwe.ChainID, nonce,
+		issuedAt.Format(time.RFC3339), expires.Format(time.RFC3339))
 }
 func shortenAddress(address string) string { return address[:6] + "..." + address[len(address)-4:] }
 func verifySignature(address, message, signature string) bool {
