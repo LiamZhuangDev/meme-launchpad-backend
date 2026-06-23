@@ -20,6 +20,7 @@ type Application struct {
 	Config config.Config
 	DB     *pgxpool.Pool
 	Users  *repository.UserRepository
+	Tokens *repository.TokenRepository
 	Auth   *auth.Service
 }
 
@@ -37,6 +38,7 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 	application := &Application{Config: cfg, DB: pool}
 	if pool != nil {
 		application.Users = repository.NewUserRepository(pool)
+		application.Tokens = repository.NewTokenRepository(pool)
 		application.Auth = auth.New(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE))
 	}
 	return application
@@ -51,7 +53,7 @@ func (a *Application) Close() {
 func (a *Application) HTTPServer() *http.Server {
 	return &http.Server{
 		Addr:              fmt.Sprintf(":%d", a.Config.HTTP.Port),
-		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth),
+		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }

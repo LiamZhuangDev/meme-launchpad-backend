@@ -2,24 +2,96 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
+	"github.com/meme-launchpad/app-rebuild/internal/repository"
 )
 
 // NewHandler returns the complete HTTP surface implemented so far.
 // Future steps will add routes here, while keeping main.go focused on process
 // startup and shutdown.
-func NewHandler(serviceName string, authService *auth.Service) http.Handler {
+type TokenReader interface {
+	List(context.Context, int, int) ([]repository.Token, error)
+	FindByAddress(context.Context, string) (repository.Token, error)
+}
+
+func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", health(serviceName))
+	if tokens != nil {
+		mux.HandleFunc("/api/v1/token/list", tokenList(tokens))
+		mux.HandleFunc("/api/v1/token/detail", tokenDetail(tokens))
+	}
 	if authService != nil {
 		mux.HandleFunc("/api/v1/user/sign-msg", signMessage(authService))
 		mux.HandleFunc("/api/v1/user/wallet-login", walletLogin(authService))
 		mux.HandleFunc("/api/v1/user/me", currentUser(authService))
 	}
 	return mux
+}
+
+func tokenList(tokens TokenReader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		page, size, err := pagination(r)
+		if err != nil {
+			writeError(w, err, http.StatusBadRequest)
+			return
+		}
+		items, err := tokens.List(r.Context(), size, (page-1)*size)
+		if err != nil {
+			writeError(w, "failed to list tokens", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"items": items, "page": page, "pageSize": size}, http.StatusOK)
+	}
+}
+
+func tokenDetail(tokens TokenReader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		address := r.URL.Query().Get("address")
+		if address == "" {
+			writeError(w, "address is required", http.StatusBadRequest)
+			return
+		}
+		token, err := tokens.FindByAddress(r.Context(), address)
+		if err != nil {
+			writeError(w, "token not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, token, http.StatusOK)
+	}
+}
+
+func pagination(r *http.Request) (int, int, error) {
+	page, size := 1, 20
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			return 0, 0, fmt.Errorf("page must be positive")
+		}
+		page = parsed
+	}
+	if raw := r.URL.Query().Get("pageSize"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return 0, 0, fmt.Errorf("pageSize must be from 1 to 100")
+		}
+		size = parsed
+	}
+	return page, size, nil
 }
 
 func signMessage(service *auth.Service) http.HandlerFunc {

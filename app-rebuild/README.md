@@ -12,8 +12,8 @@ The original backend is not imported or modified by this project.
 - [x] Step 1 — runnable HTTP foundation and health endpoint
 - [x] Step 2 — configuration and application dependencies
 - [x] Step 3 — PostgreSQL connection and first `users` repository
-- [x] Step 4 — wallet-signature login and JWT authentication
-- [ ] Step 5 — token read APIs and database models
+- [x] Step 4 — Sign-In with Ethereum (SIWE) and JWT authentication
+- [x] Step 5 — token read APIs and database models
 - [ ] Step 6 — token-creation intent, CREATE2 prediction, and signing
 - [ ] Step 7 — separate blockchain event indexer
 - [ ] Step 8 — event projections for tokens, trades, and K-lines
@@ -89,7 +89,7 @@ go run ./cmd/api
 `Create`. Step 4 will call them after verifying a wallet signature, so this
 step intentionally exposes no user HTTP endpoint yet.
 
-## Step 4: wallet login and JWT authentication
+## Step 4: Sign-In with Ethereum (SIWE) and JWT authentication
 
 The login flow is now runnable: request a one-time message, sign it in the
 wallet, then send its signature to `POST /api/v1/user/wallet-login`. The server
@@ -117,3 +117,22 @@ This checkpoint verifies externally owned accounts (EOAs); contract-wallet
 signatures require ERC-1271 verification, which is outside the current scope.
 It verifies a server-issued challenge, not an arbitrary SIWE message submitted
 by a client; the latter would also require an ABNF-compliant SIWE parser.
+
+## Step 5: token read model and public APIs
+
+Apply the next migration before starting the API:
+
+```bash
+psql "$DATABASE_URL" -f migrations/002_create_tokens.sql
+```
+
+The public read endpoints are:
+
+```text
+GET /api/v1/token/list?page=1&pageSize=20
+GET /api/v1/token/detail?address=0x...
+```
+
+`TokenRepository` reads the PostgreSQL `tokens` projection. It intentionally
+does not write token data or call a chain RPC during an HTTP request. Step 7
+will introduce the indexer that becomes the producer of this projection.
