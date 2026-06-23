@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ var (
 	ErrInvalidAddress   = errors.New("invalid wallet address")
 	ErrInvalidSignature = errors.New("invalid wallet signature")
 	ErrInvalidNonce     = errors.New("nonce is missing, expired, or already used")
+	ErrInvalidSIWE      = errors.New("invalid SIWE challenge")
 )
 
 type UserStore interface {
@@ -48,28 +50,43 @@ type LoginResult struct {
 	Expires int64           `json:"expiresIn"`
 }
 
-type nonceEntry struct {
-	message string
-	expires time.Time
-}
-
 type SIWEConfig struct {
 	Domain  string
 	URI     string
 	ChainID int64
 }
 
+// SIWEChallenge is the structured server-issued authentication request.
+// Message returns its canonical EIP-4361 plaintext representation.
+type SIWEChallenge struct {
+	Domain         string
+	Address        string
+	Statement      string
+	URI            string
+	Version        string
+	ChainID        int64
+	Nonce          string
+	IssuedAt       time.Time
+	ExpirationTime time.Time
+}
+
+func (c SIWEChallenge) Message() string {
+	return fmt.Sprintf("%s wants you to sign in with your Ethereum account:\n%s\n\n%s\n\nURI: %s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s\nExpiration Time: %s",
+		c.Domain, c.Address, c.Statement, c.URI, c.Version, c.ChainID, c.Nonce,
+		c.IssuedAt.UTC().Format(time.RFC3339), c.ExpirationTime.UTC().Format(time.RFC3339))
+}
+
 // Service uses in-memory nonces until Step 9 replaces this implementation with Redis.
 type Service struct {
-	users  UserStore
-	secret []byte
-	siwe   SIWEConfig
-	nonces map[string]nonceEntry
-	mu     sync.Mutex
+	users               UserStore
+	secret              []byte
+	siwe                SIWEConfig
+	challengesByAddress map[string]SIWEChallenge
+	mu                  sync.Mutex
 }
 
 func New(users UserStore, jwtSecret string, siwe SIWEConfig) *Service {
-	return &Service{users: users, secret: []byte(jwtSecret), siwe: siwe, nonces: make(map[string]nonceEntry)}
+	return &Service{users: users, secret: []byte(jwtSecret), siwe: siwe, challengesByAddress: make(map[string]SIWEChallenge)}
 }
 
 func (s *Service) RequestMessage(address string) (SignMessage, error) {
@@ -84,11 +101,15 @@ func (s *Service) RequestMessage(address string) (SignMessage, error) {
 	nonce := hex.EncodeToString(nonceBytes)
 	issuedAt := time.Now().UTC()
 	expires := issuedAt.Add(5 * time.Minute)
-	message := s.siweMessage(address, nonce, issuedAt, expires)
+	challenge := SIWEChallenge{
+		Domain: s.siwe.Domain, Address: address, Statement: "Sign in to MEME Launchpad.",
+		URI: s.siwe.URI, Version: "1", ChainID: s.siwe.ChainID, Nonce: nonce,
+		IssuedAt: issuedAt, ExpirationTime: expires,
+	}
 	s.mu.Lock()
-	s.nonces[address] = nonceEntry{message: message, expires: expires}
+	s.challengesByAddress[address] = challenge
 	s.mu.Unlock()
-	return SignMessage{Message: message, Nonce: nonce, Expires: expires.Unix()}, nil
+	return SignMessage{Message: challenge.Message(), Nonce: nonce, Expires: expires.Unix()}, nil
 }
 
 func (s *Service) Login(ctx context.Context, address, signature string) (LoginResult, error) {
@@ -96,11 +117,14 @@ func (s *Service) Login(ctx context.Context, address, signature string) (LoginRe
 	if err != nil {
 		return LoginResult{}, err
 	}
-	entry, err := s.getNonce(address)
+	entry, err := s.getChallenge(address)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !verifySignature(address, entry.message, signature) {
+	if err := s.validateChallenge(entry, address); err != nil {
+		return LoginResult{}, err
+	}
+	if !verifySignature(address, entry.Message(), signature) {
 		return LoginResult{}, ErrInvalidSignature
 	}
 	if err := s.consumeNonce(address); err != nil {
@@ -134,12 +158,12 @@ func (s *Service) ParseToken(raw string) (Claims, error) {
 	return claims, nil
 }
 
-func (s *Service) getNonce(address string) (nonceEntry, error) {
+func (s *Service) getChallenge(address string) (SIWEChallenge, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.nonces[address]
-	if !ok || time.Now().After(entry.expires) {
-		return nonceEntry{}, ErrInvalidNonce
+	entry, ok := s.challengesByAddress[address]
+	if !ok || time.Now().After(entry.ExpirationTime) {
+		return SIWEChallenge{}, ErrInvalidNonce
 	}
 	return entry, nil
 }
@@ -147,11 +171,11 @@ func (s *Service) getNonce(address string) (nonceEntry, error) {
 func (s *Service) consumeNonce(address string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.nonces[address]
-	if !ok || time.Now().After(entry.expires) {
+	entry, ok := s.challengesByAddress[address]
+	if !ok || time.Now().After(entry.ExpirationTime) {
 		return ErrInvalidNonce
 	}
-	delete(s.nonces, address)
+	delete(s.challengesByAddress, address)
 	return nil
 }
 
@@ -168,12 +192,41 @@ func normalizeAddress(address string) (string, error) {
 	}
 	return common.HexToAddress(address).Hex(), nil
 }
-func (s *Service) siweMessage(address, nonce string, issuedAt, expires time.Time) string {
-	return fmt.Sprintf("%s wants you to sign in with your Ethereum account:\n%s\n\nSign in to MEME Launchpad.\n\nURI: %s\nVersion: 1\nChain ID: %d\nNonce: %s\nIssued At: %s\nExpiration Time: %s",
-		s.siwe.Domain, address, s.siwe.URI, s.siwe.ChainID, nonce,
-		issuedAt.Format(time.RFC3339), expires.Format(time.RFC3339))
+
+func (s *Service) validateChallenge(challenge SIWEChallenge, address string) error {
+	if challenge.Domain != s.siwe.Domain || challenge.URI != s.siwe.URI || challenge.ChainID != s.siwe.ChainID || challenge.Version != "1" || challenge.Address != address {
+		return ErrInvalidSIWE
+	}
+	if challenge.Statement == "" || strings.Contains(challenge.Statement, "\n") || !validNonce(challenge.Nonce) {
+		return ErrInvalidSIWE
+	}
+	uri, err := url.ParseRequestURI(challenge.URI)
+	if err != nil || !uri.IsAbs() || uri.Host == "" || strings.ContainsAny(challenge.Domain, " \t\n") {
+		return ErrInvalidSIWE
+	}
+	now := time.Now().UTC()
+	if challenge.IssuedAt.After(now.Add(time.Minute)) || !challenge.ExpirationTime.After(challenge.IssuedAt) || !now.Before(challenge.ExpirationTime) {
+		return ErrInvalidSIWE
+	}
+	return nil
 }
+
+func validNonce(nonce string) bool {
+	if len(nonce) < 8 {
+		return false
+	}
+	for _, char := range nonce {
+		if !(char >= 'a' && char <= 'z') && !(char >= 'A' && char <= 'Z') && !(char >= '0' && char <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func shortenAddress(address string) string { return address[:6] + "..." + address[len(address)-4:] }
+
+// It checks whether the given Ethereum address actually signed the provided message using the supplied signature.
+// Therefore the signer controls the private key for that Ethereum address.
 func verifySignature(address, message, signature string) bool {
 	sig, err := hexutil.Decode(signature)
 	if err != nil || len(sig) != 65 {

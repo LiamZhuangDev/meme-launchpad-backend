@@ -63,3 +63,30 @@ func TestLoginVerifiesWalletSignatureAndConsumesNonce(t *testing.T) {
 		t.Fatalf("replayed Login() error = %v, want %v", err, ErrInvalidNonce)
 	}
 }
+
+func TestLoginRejectsChallengeWithUnexpectedChainID(t *testing.T) {
+	key, err := ethcrypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
+	service := New(&fakeUsers{}, "test-secret", SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
+	challenge, err := service.RequestMessage(address)
+	if err != nil {
+		t.Fatalf("RequestMessage() error = %v", err)
+	}
+	prefix := fmt.Sprintf("\x19Ethereum Signed Message:\n%d", len(challenge.Message))
+	signature, err := ethcrypto.Sign(ethcrypto.Keccak256Hash([]byte(prefix+challenge.Message)).Bytes(), key)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	normalized, _ := normalizeAddress(address)
+	entry := service.challengesByAddress[normalized]
+	entry.ChainID = 1
+	service.challengesByAddress[normalized] = entry
+	_, err = service.Login(context.Background(), address, hexutil.Encode(signature))
+	if err != ErrInvalidSIWE {
+		t.Fatalf("Login() error = %v, want %v", err, ErrInvalidSIWE)
+	}
+}
