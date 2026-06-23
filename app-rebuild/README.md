@@ -12,7 +12,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 1 — runnable HTTP foundation and health endpoint
 - [x] Step 2 — configuration and application dependencies
 - [x] Step 3 — PostgreSQL connection and first `users` repository
-- [ ] Step 4 — wallet-signature login and JWT authentication
+- [x] Step 4 — wallet-signature login and JWT authentication
 - [ ] Step 5 — token read APIs and database models
 - [ ] Step 6 — token-creation intent, CREATE2 prediction, and signing
 - [ ] Step 7 — separate blockchain event indexer
@@ -88,3 +88,15 @@ go run ./cmd/api
 `UserRepository` currently contains only two operations: `FindByAddress` and
 `Create`. Step 4 will call them after verifying a wallet signature, so this
 step intentionally exposes no user HTTP endpoint yet.
+
+## Step 4: wallet login and JWT authentication
+
+The login flow is now runnable: request a one-time message, sign it in the
+wallet, then send its signature to `POST /api/v1/user/wallet-login`. The server
+recovers the Ethereum address from the personal-signature, consumes the nonce,
+finds or creates the user, and returns a 24-hour JWT. `GET /api/v1/user/me`
+requires that token in `Authorization: Bearer <token>`.
+
+Set `JWT_SECRET` outside local development. The in-memory nonce store is only
+for this checkpoint; restarting the API invalidates outstanding messages.
+Step 9 will replace it with Redis so authentication works across processes.

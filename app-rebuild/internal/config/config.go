@@ -18,6 +18,7 @@ type Config struct {
 	ServiceName string
 	HTTP        HTTPConfig
 	Database    DatabaseConfig
+	Auth        AuthConfig
 }
 
 type HTTPConfig struct {
@@ -26,6 +27,10 @@ type HTTPConfig struct {
 
 type DatabaseConfig struct {
 	URL string
+}
+
+type AuthConfig struct {
+	JWTSecret string
 }
 
 // LookupEnv matches os.LookupEnv and makes configuration parsing testable
@@ -46,6 +51,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		Database: DatabaseConfig{
 			URL: defaultDatabaseURL,
 		},
+		Auth: AuthConfig{JWTSecret: "development-only-secret-change-me"},
 	}
 
 	if name, ok := lookup("APP_NAME"); ok && name != "" {
@@ -62,6 +68,9 @@ func Load(lookup LookupEnv) (Config, error) {
 
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
 		config.Database.URL = databaseURL
+	}
+	if secret, ok := lookup("JWT_SECRET"); ok && secret != "" {
+		config.Auth.JWTSecret = secret
 	}
 
 	return config, nil
