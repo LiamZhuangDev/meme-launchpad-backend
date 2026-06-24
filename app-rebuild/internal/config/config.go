@@ -25,6 +25,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Auth          AuthConfig
 	TokenCreation TokenCreationConfig
+	Indexer       IndexerConfig
 }
 
 type HTTPConfig struct {
@@ -52,6 +53,17 @@ type TokenCreationConfig struct {
 	ChainID, CoreContract, FactoryContract, SignerPrivateKey, TokenBytecode string
 }
 
+// IndexerConfig describes the independently deployed blockchain consumer.
+// It remains optional for the API process; cmd/indexer requires it explicitly.
+type IndexerConfig struct {
+	RPCURL         string
+	ChainID        int64
+	CoreContract   string
+	StartBlock     uint64
+	BlockBatchSize uint64
+	PollInterval   int
+}
+
 // LookupEnv matches os.LookupEnv and makes configuration parsing testable
 // without mutating the process environment.
 type LookupEnv func(string) (string, bool)
@@ -74,6 +86,7 @@ func Load(lookup LookupEnv) (Config, error) {
 			JWTSecret: "development-only-secret-change-me",
 			SIWE:      SIWEConfig{Domain: "localhost:38081", URI: "http://localhost:38081", ChainID: 97},
 		},
+		Indexer: IndexerConfig{BlockBatchSize: 500, PollInterval: 5},
 	}
 
 	if name, ok := lookup("APP_NAME"); ok && name != "" {
@@ -121,8 +134,53 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := config.validateTokenCreation(); err != nil {
 		return Config{}, err
 	}
+	if value, ok := lookup("INDEXER_RPC_URL"); ok && value != "" {
+		config.Indexer.RPCURL = value
+	}
+	if value, ok := lookup("INDEXER_CORE"); ok && value != "" {
+		config.Indexer.CoreContract = value
+	}
+	if value, ok := lookup("INDEXER_CHAIN_ID"); ok && value != "" {
+		chainID, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || chainID < 1 {
+			return Config{}, fmt.Errorf("INDEXER_CHAIN_ID must be a positive integer")
+		}
+		config.Indexer.ChainID = chainID
+	}
+	if value, ok := lookup("INDEXER_START_BLOCK"); ok && value != "" {
+		block, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("INDEXER_START_BLOCK must be a non-negative integer")
+		}
+		config.Indexer.StartBlock = block
+	}
+	if value, ok := lookup("INDEXER_BLOCK_BATCH_SIZE"); ok && value != "" {
+		size, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || size < 1 {
+			return Config{}, fmt.Errorf("INDEXER_BLOCK_BATCH_SIZE must be positive")
+		}
+		config.Indexer.BlockBatchSize = size
+	}
+	if value, ok := lookup("INDEXER_POLL_INTERVAL_SECONDS"); ok && value != "" {
+		seconds, err := strconv.Atoi(value)
+		if err != nil || seconds < 1 {
+			return Config{}, fmt.Errorf("INDEXER_POLL_INTERVAL_SECONDS must be positive")
+		}
+		config.Indexer.PollInterval = seconds
+	}
 
 	return config, nil
+}
+
+// Validate verifies the values required when cmd/indexer is started.
+func (c IndexerConfig) Validate() error {
+	if c.RPCURL == "" || c.ChainID < 1 || !common.IsHexAddress(c.CoreContract) {
+		return fmt.Errorf("INDEXER_RPC_URL, INDEXER_CHAIN_ID, and INDEXER_CORE are required for the indexer")
+	}
+	if c.BlockBatchSize < 1 || c.PollInterval < 1 {
+		return fmt.Errorf("indexer batch size and poll interval must be positive")
+	}
+	return nil
 }
 
 func (c Config) validateTokenCreation() error {

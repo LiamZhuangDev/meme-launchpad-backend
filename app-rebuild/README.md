@@ -15,7 +15,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 4 — Sign-In with Ethereum (SIWE) and JWT authentication
 - [x] Step 5 — token read APIs and database models
 - [x] Step 6 — token-creation intent, CREATE2 prediction, and signing
-- [ ] Step 7 — separate blockchain event indexer
+- [x] Step 7 — separate blockchain event indexer
 - [ ] Step 8 — event projections for tokens, trades, and K-lines
 - [ ] Step 9 — Redis nonce cache and presigned image uploads
 
@@ -220,3 +220,42 @@ sequenceDiagram
     Factory-->>Core: Return token address
     Core-->>Wallet: Token creation transaction succeeds
 ```
+
+## Step 7: separate blockchain event indexer
+
+The API still never performs chain reads while serving a request. A separate
+`cmd/indexer` process polls logs emitted by the configured `MEMECore` contract,
+writes them to an append-only `chain_events` ledger, and atomically records the
+last fully persisted block in `chain_event_checkpoints`.
+
+```text
+MEMECore logs -> cmd/indexer -> chain_events + checkpoint -> Step 8 projections
+```
+
+Apply the indexer migration once:
+
+```bash
+psql "$DATABASE_URL" -f migrations/004_create_chain_event_index.sql
+```
+
+Then run it in a second terminal. Unlike the API, the indexer requires these
+settings:
+
+```bash
+export INDEXER_RPC_URL='https://your-bsc-testnet-rpc'
+export INDEXER_CHAIN_ID=97
+export INDEXER_CORE='0xYourDeployedMEMECoreAddress'
+export INDEXER_START_BLOCK=12345678
+go run ./cmd/indexer
+```
+
+Optional controls are `INDEXER_BLOCK_BATCH_SIZE` (default `500`) and
+`INDEXER_POLL_INTERVAL_SECONDS` (default `5`). On startup the process verifies
+the RPC chain ID. It resumes from its database checkpoint, or from
+`INDEXER_START_BLOCK` on its first run. A range is only checkpointed in the
+same transaction that inserts its logs; re-reading an already saved log is safe
+because its `(chain_id, transaction_hash, log_index)` key is unique.
+
+This step deliberately stores raw topics and data without decoding them into
+the `tokens` table. Step 8 will be the explicit boundary that turns these raw,
+replayable chain facts into token, trade, and K-line read models.
