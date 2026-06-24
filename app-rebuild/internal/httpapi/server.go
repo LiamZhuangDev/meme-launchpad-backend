@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
+	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
 )
 
 // NewHandler returns the complete HTTP surface implemented so far.
@@ -20,7 +22,7 @@ type TokenReader interface {
 	FindByAddress(context.Context, string) (repository.Token, error)
 }
 
-func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader) http.Handler {
+func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader, creation *tokencreation.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", health(serviceName))
 	if tokens != nil {
@@ -31,8 +33,42 @@ func NewHandler(serviceName string, authService *auth.Service, tokens TokenReade
 		mux.HandleFunc("/api/v1/user/sign-msg", signMessage(authService))
 		mux.HandleFunc("/api/v1/user/wallet-login", walletLogin(authService))
 		mux.HandleFunc("/api/v1/user/me", currentUser(authService))
+		if creation != nil {
+			mux.HandleFunc("/api/v1/token/create", createToken(authService, creation))
+		}
 	}
 	return mux
+}
+
+func createToken(authService *auth.Service, creation *tokencreation.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		claims, ok := bearerClaims(w, r, authService)
+		if !ok {
+			return
+		}
+		var request struct {
+			Name                 string `json:"name"`
+			Symbol               string `json:"symbol"`
+			LaunchTime           uint64 `json:"launchTime"`
+			InitialBuyPercentage uint64 `json:"initialBuyPercentage"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			writeError(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		result, err := creation.Create(r.Context(), tokencreation.Request{Name: request.Name, Symbol: request.Symbol, Creator: common.HexToAddress(claims.Address), LaunchTime: request.LaunchTime, InitialBuyPercentage: request.InitialBuyPercentage})
+		if err != nil {
+			writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, result, http.StatusOK)
+	}
 }
 
 func tokenList(tokens TokenReader) http.HandlerFunc {
@@ -136,19 +172,27 @@ func currentUser(service *auth.Service) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		header := r.Header.Get("Authorization")
-		const prefix = "Bearer "
-		if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
-			writeError(w, "missing bearer token", http.StatusUnauthorized)
-			return
-		}
-		claims, err := service.ParseToken(header[len(prefix):])
-		if err != nil {
-			writeError(w, err, http.StatusUnauthorized)
+		claims, ok := bearerClaims(w, r, service)
+		if !ok {
 			return
 		}
 		writeJSON(w, claims, http.StatusOK)
 	}
+}
+
+func bearerClaims(w http.ResponseWriter, r *http.Request, service *auth.Service) (auth.Claims, bool) {
+	header := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
+		writeError(w, "missing bearer token", http.StatusUnauthorized)
+		return auth.Claims{}, false
+	}
+	claims, err := service.ParseToken(header[len(prefix):])
+	if err != nil {
+		writeError(w, err, http.StatusUnauthorized)
+		return auth.Claims{}, false
+	}
+	return claims, true
 }
 func writeJSON(w http.ResponseWriter, value any, status int) {
 	w.Header().Set("Content-Type", "application/json")

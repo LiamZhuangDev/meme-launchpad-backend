@@ -2,8 +2,13 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/common"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
 const (
@@ -15,10 +20,11 @@ const (
 // Config contains only the configuration Step 2 needs. Future steps will add
 // database, Redis, and chain settings here when their clients are introduced.
 type Config struct {
-	ServiceName string
-	HTTP        HTTPConfig
-	Database    DatabaseConfig
-	Auth        AuthConfig
+	ServiceName   string
+	HTTP          HTTPConfig
+	Database      DatabaseConfig
+	Auth          AuthConfig
+	TokenCreation TokenCreationConfig
 }
 
 type HTTPConfig struct {
@@ -38,6 +44,12 @@ type SIWEConfig struct {
 	Domain  string
 	URI     string
 	ChainID int64
+}
+
+// TokenCreationConfig is deliberately separate from SIWE's chain identity:
+// the former signs the exact payload checked by MEMECore.createToken.
+type TokenCreationConfig struct {
+	ChainID, CoreContract, FactoryContract, SignerPrivateKey, TokenBytecode string
 }
 
 // LookupEnv matches os.LookupEnv and makes configuration parsing testable
@@ -95,6 +107,50 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 		config.Auth.SIWE.ChainID = chainID
 	}
+	for env, target := range map[string]*string{
+		"TOKEN_CREATION_CHAIN_ID":   &config.TokenCreation.ChainID,
+		"TOKEN_CREATION_CORE":       &config.TokenCreation.CoreContract,
+		"TOKEN_CREATION_FACTORY":    &config.TokenCreation.FactoryContract,
+		"TOKEN_CREATION_SIGNER_KEY": &config.TokenCreation.SignerPrivateKey,
+		"TOKEN_CREATION_BYTECODE":   &config.TokenCreation.TokenBytecode,
+	} {
+		if value, ok := lookup(env); ok && value != "" {
+			*target = value
+		}
+	}
+	if err := config.validateTokenCreation(); err != nil {
+		return Config{}, err
+	}
 
 	return config, nil
+}
+
+func (c Config) validateTokenCreation() error {
+	v := c.TokenCreation
+	values := []string{v.ChainID, v.CoreContract, v.FactoryContract, v.SignerPrivateKey, v.TokenBytecode}
+	configured := 0
+	for _, value := range values {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return nil
+	}
+	if configured != len(values) {
+		return fmt.Errorf("TOKEN_CREATION_CHAIN_ID, TOKEN_CREATION_CORE, TOKEN_CREATION_FACTORY, TOKEN_CREATION_SIGNER_KEY, and TOKEN_CREATION_BYTECODE must be set together")
+	}
+	if chainID, err := strconv.ParseInt(v.ChainID, 10, 64); err != nil || chainID < 1 {
+		return fmt.Errorf("TOKEN_CREATION_CHAIN_ID must be a positive integer")
+	}
+	if !common.IsHexAddress(v.CoreContract) || !common.IsHexAddress(v.FactoryContract) {
+		return fmt.Errorf("TOKEN_CREATION_CORE and TOKEN_CREATION_FACTORY must be Ethereum addresses")
+	}
+	if _, err := ethcrypto.HexToECDSA(strings.TrimPrefix(v.SignerPrivateKey, "0x")); err != nil {
+		return fmt.Errorf("TOKEN_CREATION_SIGNER_KEY is invalid: %w", err)
+	}
+	if decoded, err := hex.DecodeString(strings.TrimPrefix(v.TokenBytecode, "0x")); err != nil || len(decoded) == 0 {
+		return fmt.Errorf("TOKEN_CREATION_BYTECODE must be non-empty hexadecimal bytecode")
+	}
+	return nil
 }

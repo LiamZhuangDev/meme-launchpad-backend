@@ -5,23 +5,29 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/config"
 	"github.com/meme-launchpad/app-rebuild/internal/database"
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
+	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
 )
 
 // Application is the dependency container for one API process.
 type Application struct {
-	Config config.Config
-	DB     *pgxpool.Pool
-	Users  *repository.UserRepository
-	Tokens *repository.TokenRepository
-	Auth   *auth.Service
+	Config        config.Config
+	DB            *pgxpool.Pool
+	Users         *repository.UserRepository
+	Tokens        *repository.TokenRepository
+	Auth          *auth.Service
+	TokenCreation *tokencreation.Service
 }
 
 // New opens the process-wide PostgreSQL pool and wires repositories to it.
@@ -40,6 +46,7 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 		application.Users = repository.NewUserRepository(pool)
 		application.Tokens = repository.NewTokenRepository(pool)
 		application.Auth = auth.New(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE))
+		application.TokenCreation = newTokenCreation(cfg, repository.NewTokenCreationRepository(pool))
 	}
 	return application
 }
@@ -53,7 +60,31 @@ func (a *Application) Close() {
 func (a *Application) HTTPServer() *http.Server {
 	return &http.Server{
 		Addr:              fmt.Sprintf(":%d", a.Config.HTTP.Port),
-		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens),
+		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens, a.TokenCreation),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func newTokenCreation(cfg config.Config, store *repository.TokenCreationRepository) *tokencreation.Service {
+	chain := cfg.TokenCreation
+	if chain.ChainID == "" && chain.CoreContract == "" && chain.FactoryContract == "" && chain.SignerPrivateKey == "" && chain.TokenBytecode == "" {
+		return nil
+	}
+	chainID, err := strconv.ParseInt(chain.ChainID, 10, 64)
+	if err != nil || !common.IsHexAddress(chain.CoreContract) || !common.IsHexAddress(chain.FactoryContract) {
+		return nil
+	}
+	signer, err := ethcrypto.HexToECDSA(strings.TrimPrefix(chain.SignerPrivateKey, "0x"))
+	if err != nil {
+		return nil
+	}
+	bytecode, err := tokencreation.ParseBytecode(chain.TokenBytecode)
+	if err != nil {
+		return nil
+	}
+	service, err := tokencreation.New(tokencreation.Config{ChainID: chainID, Core: common.HexToAddress(chain.CoreContract), Factory: common.HexToAddress(chain.FactoryContract), TokenCreationBytecode: bytecode, Signer: signer}, store)
+	if err != nil {
+		return nil
+	}
+	return service
 }
