@@ -15,6 +15,7 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
 	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
+	"github.com/meme-launchpad/app-rebuild/internal/upload"
 )
 
 type fakeTokenReader struct {
@@ -24,6 +25,12 @@ type fakeTokenReader struct {
 
 type fakeCreationStore struct {
 	value repository.TokenCreationRequest
+}
+
+type fakePresigner struct {
+	folder   string
+	mimeType string
+	chainID  int
 }
 
 func (s *fakeCreationStore) Create(_ context.Context, value repository.TokenCreationRequest) error {
@@ -40,11 +47,16 @@ func (f *fakeTokenReader) FindByAddress(context.Context, string) (repository.Tok
 	return repository.Token{}, nil
 }
 
+func (f *fakePresigner) Presign(folder, mimeType string, chainID int) (upload.PresignResult, error) {
+	f.folder, f.mimeType, f.chainID = folder, mimeType, chainID
+	return upload.PresignResult{UploadURL: "https://upload.example", PublicURL: "https://cdn.example/image.png", Key: folder + "/image.png"}, nil
+}
+
 func TestHealth(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
 
-	NewHandler("meme-launchpad-rebuild-api", nil, nil, nil).ServeHTTP(recorder, request)
+	NewHandler("meme-launchpad-rebuild-api", nil, nil, nil, nil).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -61,7 +73,7 @@ func TestTokenListUsesPagination(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/token/list?page=2&pageSize=5", nil)
 	recorder := httptest.NewRecorder()
 
-	NewHandler("test", nil, tokens, nil).ServeHTTP(recorder, request)
+	NewHandler("test", nil, tokens, nil, nil).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -95,7 +107,7 @@ func TestCreateTokenUsesAuthenticatedWalletAsCreator(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
-	NewHandler("test", authService, nil, creation).ServeHTTP(recorder, request)
+	NewHandler("test", authService, nil, creation, nil).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
@@ -109,6 +121,30 @@ func TestCreateTokenUsesAuthenticatedWalletAsCreator(t *testing.T) {
 	}
 	if response["signature"] == "" || response["createArg"] == "" {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestPresignImageRequiresAuthAndUsesFolder(t *testing.T) {
+	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
+	presigner := &fakePresigner{}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: "0x3333333333333333333333333333333333333333"}).SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/file/token-logo-presign?mimeType=image/webp&chainId=56", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+
+	NewHandler("test", authService, nil, nil, presigner).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+	}
+	if presigner.folder != "token-logo" || presigner.mimeType != "image/webp" || presigner.chainID != 56 {
+		t.Fatalf("presign args = %s %s %d", presigner.folder, presigner.mimeType, presigner.chainID)
+	}
+	if !strings.Contains(recorder.Body.String(), `"uploadUrl":"https://upload.example"`) {
+		t.Fatalf("body = %s", recorder.Body)
 	}
 }
 

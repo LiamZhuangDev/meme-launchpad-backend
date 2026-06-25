@@ -23,9 +23,11 @@ type Config struct {
 	ServiceName   string
 	HTTP          HTTPConfig
 	Database      DatabaseConfig
+	Redis         RedisConfig
 	Auth          AuthConfig
 	TokenCreation TokenCreationConfig
 	Indexer       IndexerConfig
+	COS           COSConfig
 }
 
 type HTTPConfig struct {
@@ -34,6 +36,12 @@ type HTTPConfig struct {
 
 type DatabaseConfig struct {
 	URL string
+}
+
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
 }
 
 type AuthConfig struct {
@@ -62,6 +70,14 @@ type IndexerConfig struct {
 	StartBlock     uint64
 	BlockBatchSize uint64
 	PollInterval   int
+}
+
+type COSConfig struct {
+	SecretID  string
+	SecretKey string
+	Bucket    string
+	Region    string
+	Domain    string
 }
 
 // LookupEnv matches os.LookupEnv and makes configuration parsing testable
@@ -104,6 +120,19 @@ func Load(lookup LookupEnv) (Config, error) {
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
 		config.Database.URL = databaseURL
 	}
+	if redisAddr, ok := lookup("REDIS_ADDR"); ok && redisAddr != "" {
+		config.Redis.Addr = redisAddr
+	}
+	if redisPassword, ok := lookup("REDIS_PASSWORD"); ok {
+		config.Redis.Password = redisPassword
+	}
+	if redisDB, ok := lookup("REDIS_DB"); ok && redisDB != "" {
+		db, err := strconv.Atoi(redisDB)
+		if err != nil || db < 0 {
+			return Config{}, fmt.Errorf("REDIS_DB must be a non-negative integer")
+		}
+		config.Redis.DB = db
+	}
 	if secret, ok := lookup("JWT_SECRET"); ok && secret != "" {
 		config.Auth.JWTSecret = secret
 	}
@@ -132,6 +161,20 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 	}
 	if err := config.validateTokenCreation(); err != nil {
+		return Config{}, err
+	}
+	for env, target := range map[string]*string{
+		"COS_SECRET_ID":  &config.COS.SecretID,
+		"COS_SECRET_KEY": &config.COS.SecretKey,
+		"COS_BUCKET":     &config.COS.Bucket,
+		"COS_REGION":     &config.COS.Region,
+		"COS_DOMAIN":     &config.COS.Domain,
+	} {
+		if value, ok := lookup(env); ok && value != "" {
+			*target = value
+		}
+	}
+	if err := config.validateCOS(); err != nil {
 		return Config{}, err
 	}
 	if value, ok := lookup("INDEXER_RPC_URL"); ok && value != "" {
@@ -209,6 +252,26 @@ func (c Config) validateTokenCreation() error {
 	}
 	if decoded, err := hex.DecodeString(strings.TrimPrefix(v.TokenBytecode, "0x")); err != nil || len(decoded) == 0 {
 		return fmt.Errorf("TOKEN_CREATION_BYTECODE must be non-empty hexadecimal bytecode")
+	}
+	return nil
+}
+
+func (c Config) validateCOS() error {
+	v := c.COS
+	required := []string{v.SecretID, v.SecretKey, v.Bucket, v.Region}
+	configured := 0
+	for _, value := range append(required, v.Domain) {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return nil
+	}
+	for _, value := range required {
+		if value == "" {
+			return fmt.Errorf("COS_SECRET_ID, COS_SECRET_KEY, COS_BUCKET, and COS_REGION must be set together")
+		}
 	}
 	return nil
 }

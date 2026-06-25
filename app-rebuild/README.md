@@ -17,7 +17,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 6 — token-creation intent, CREATE2 prediction, and signing
 - [x] Step 7 — separate blockchain event indexer
 - [x] Step 8 — event projections for tokens, trades, and K-lines
-- [ ] Step 9 — Redis nonce cache and presigned image uploads
+- [x] Step 9 — Redis nonce cache and presigned image uploads
 
 ## Step 1: run the foundation
 
@@ -110,9 +110,9 @@ for your deployment:
 | `SIWE_URI` | `http://localhost:38081` |
 | `SIWE_CHAIN_ID` | `97` |
 
-Set `JWT_SECRET` outside local development. The in-memory nonce store is only
-for this checkpoint; restarting the API invalidates outstanding messages.
-Step 9 will replace it with Redis so authentication works across processes.
+Set `JWT_SECRET` outside local development. By default, local development still
+uses an in-memory challenge store. Step 9 adds an optional Redis-backed store
+so authentication works across multiple API processes.
 This checkpoint verifies externally owned accounts (EOAs); contract-wallet
 signatures require ERC-1271 verification, which is outside the current scope.
 It verifies a server-issued challenge, not an arbitrary SIWE message submitted
@@ -302,3 +302,64 @@ price = bnbAmount / tokenAmount
 ```
 
 with 18 decimal places.
+
+## Step 9: Redis nonce cache and presigned image uploads
+
+The SIWE challenge store now has two implementations:
+
+```text
+local/default: in-memory challenge store
+production:    Redis challenge store when REDIS_ADDR is set
+```
+
+Redis makes wallet login work across multiple API instances because the
+server-issued SIWE challenge is no longer trapped inside one process.
+
+Optional Redis settings:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `REDIS_ADDR` | Redis address, for example `localhost:6379` |
+| `REDIS_PASSWORD` | Redis password, empty for local Redis |
+| `REDIS_DB` | Redis DB number, default `0` |
+
+This step also adds authenticated presigned image upload endpoints:
+
+```text
+GET  /api/v1/file/token-logo-presign?mimeType=image/png&chainId=97
+GET  /api/v1/file/token-banner-presign?mimeType=image/webp&chainId=97
+GET  /api/v1/file/activity-image-presign?mimeType=image/jpeg&chainId=97
+POST /api/v1/file/upload-confirm
+```
+
+The presign routes require `Authorization: Bearer <JWT>`. They return a COS
+PUT URL for direct browser upload plus the future public URL.
+
+Enable presigned uploads with Tencent COS-style settings:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `COS_SECRET_ID` | COS access key ID |
+| `COS_SECRET_KEY` | COS secret key |
+| `COS_BUCKET` | Bucket name |
+| `COS_REGION` | Bucket region, for example `ap-guangzhou` |
+| `COS_DOMAIN` | Optional CDN/custom public domain |
+
+Example:
+
+```bash
+export REDIS_ADDR='localhost:6379'
+export COS_SECRET_ID='replace-me'
+export COS_SECRET_KEY='replace-me'
+export COS_BUCKET='your-bucket'
+export COS_REGION='ap-guangzhou'
+
+go run ./cmd/api
+```
+
+Then call a presign endpoint with the JWT returned by wallet login:
+
+```bash
+curl 'http://localhost:38081/api/v1/file/token-logo-presign?mimeType=image/png&chainId=97' \
+  -H "Authorization: Bearer $JWT"
+```

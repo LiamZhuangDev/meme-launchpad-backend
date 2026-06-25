@@ -21,9 +21,17 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestLoadReadsEnvironment(t *testing.T) {
 	values := map[string]string{
-		"APP_NAME":     "local-api",
-		"HTTP_PORT":    "48080",
-		"DATABASE_URL": "postgres://local/test",
+		"APP_NAME":       "local-api",
+		"HTTP_PORT":      "48080",
+		"DATABASE_URL":   "postgres://local/test",
+		"REDIS_ADDR":     "localhost:6379",
+		"REDIS_PASSWORD": "secret",
+		"REDIS_DB":       "2",
+		"COS_SECRET_ID":  "cos-id",
+		"COS_SECRET_KEY": "cos-key",
+		"COS_BUCKET":     "bucket",
+		"COS_REGION":     "ap-guangzhou",
+		"COS_DOMAIN":     "https://cdn.example",
 	}
 
 	config, err := Load(func(key string) (string, bool) {
@@ -37,6 +45,12 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	if config.ServiceName != "local-api" || config.HTTP.Port != 48080 || config.Database.URL != "postgres://local/test" {
 		t.Fatalf("config = %+v, want local-api on 48080", config)
 	}
+	if config.Redis.Addr != "localhost:6379" || config.Redis.Password != "secret" || config.Redis.DB != 2 {
+		t.Fatalf("redis config = %+v", config.Redis)
+	}
+	if config.COS.SecretID != "cos-id" || config.COS.Domain != "https://cdn.example" {
+		t.Fatalf("cos config = %+v", config.COS)
+	}
 }
 
 func TestLoadRejectsInvalidPort(t *testing.T) {
@@ -48,5 +62,17 @@ func TestLoadRejectsInvalidPort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want invalid port error")
+	}
+}
+
+func TestLoadRejectsPartialCOSConfig(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "COS_BUCKET" {
+			return "bucket", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want COS config error")
 	}
 }

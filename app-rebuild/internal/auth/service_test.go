@@ -31,7 +31,7 @@ func TestLoginVerifiesWalletSignatureAndConsumesNonce(t *testing.T) {
 	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
 	service := New(&fakeUsers{}, "test-secret", SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
 
-	challenge, err := service.RequestMessage(address)
+	challenge, err := service.RequestMessage(context.Background(), address)
 	if err != nil {
 		t.Fatalf("RequestMessage() error = %v", err)
 	}
@@ -71,7 +71,7 @@ func TestLoginRejectsChallengeWithUnexpectedChainID(t *testing.T) {
 	}
 	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
 	service := New(&fakeUsers{}, "test-secret", SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
-	challenge, err := service.RequestMessage(address)
+	challenge, err := service.RequestMessage(context.Background(), address)
 	if err != nil {
 		t.Fatalf("RequestMessage() error = %v", err)
 	}
@@ -82,9 +82,10 @@ func TestLoginRejectsChallengeWithUnexpectedChainID(t *testing.T) {
 	}
 
 	normalized, _ := normalizeAddress(address)
-	entry := service.challengesByAddress[normalized]
+	store := service.store.(*MemoryChallengeStore)
+	entry := store.challengesByAddress[normalized]
 	entry.ChainID = 1
-	service.challengesByAddress[normalized] = entry
+	store.challengesByAddress[normalized] = entry
 	_, err = service.Login(context.Background(), address, hexutil.Encode(signature))
 	if err != ErrInvalidSIWE {
 		t.Fatalf("Login() error = %v, want %v", err, ErrInvalidSIWE)

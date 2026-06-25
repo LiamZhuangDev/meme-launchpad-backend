@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -56,6 +55,12 @@ type SIWEConfig struct {
 	ChainID int64
 }
 
+type ChallengeStore interface {
+	Save(context.Context, string, SIWEChallenge, time.Duration) error
+	Get(context.Context, string) (SIWEChallenge, error)
+	Delete(context.Context, string) error
+}
+
 // SIWEChallenge is the structured server-issued authentication request.
 // Message returns its canonical EIP-4361 plaintext representation.
 type SIWEChallenge struct {
@@ -76,20 +81,25 @@ func (c SIWEChallenge) Message() string {
 		c.IssuedAt.UTC().Format(time.RFC3339), c.ExpirationTime.UTC().Format(time.RFC3339))
 }
 
-// Service uses in-memory nonces until Step 9 replaces this implementation with Redis.
 type Service struct {
-	users               UserStore
-	secret              []byte
-	siwe                SIWEConfig
-	challengesByAddress map[string]SIWEChallenge
-	mu                  sync.Mutex
+	users  UserStore
+	secret []byte
+	siwe   SIWEConfig
+	store  ChallengeStore
 }
 
 func New(users UserStore, jwtSecret string, siwe SIWEConfig) *Service {
-	return &Service{users: users, secret: []byte(jwtSecret), siwe: siwe, challengesByAddress: make(map[string]SIWEChallenge)}
+	return NewWithChallengeStore(users, jwtSecret, siwe, NewMemoryChallengeStore())
 }
 
-func (s *Service) RequestMessage(address string) (SignMessage, error) {
+func NewWithChallengeStore(users UserStore, jwtSecret string, siwe SIWEConfig, store ChallengeStore) *Service {
+	if store == nil {
+		store = NewMemoryChallengeStore()
+	}
+	return &Service{users: users, secret: []byte(jwtSecret), siwe: siwe, store: store}
+}
+
+func (s *Service) RequestMessage(ctx context.Context, address string) (SignMessage, error) {
 	address, err := normalizeAddress(address)
 	if err != nil {
 		return SignMessage{}, err
@@ -106,9 +116,9 @@ func (s *Service) RequestMessage(address string) (SignMessage, error) {
 		URI: s.siwe.URI, Version: "1", ChainID: s.siwe.ChainID, Nonce: nonce,
 		IssuedAt: issuedAt, ExpirationTime: expires,
 	}
-	s.mu.Lock()
-	s.challengesByAddress[address] = challenge
-	s.mu.Unlock()
+	if err := s.store.Save(ctx, address, challenge, time.Until(expires)); err != nil {
+		return SignMessage{}, fmt.Errorf("store SIWE challenge: %w", err)
+	}
 	return SignMessage{Message: challenge.Message(), Nonce: nonce, Expires: expires.Unix()}, nil
 }
 
@@ -117,7 +127,7 @@ func (s *Service) Login(ctx context.Context, address, signature string) (LoginRe
 	if err != nil {
 		return LoginResult{}, err
 	}
-	entry, err := s.getChallenge(address)
+	entry, err := s.getChallenge(ctx, address)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -127,7 +137,7 @@ func (s *Service) Login(ctx context.Context, address, signature string) (LoginRe
 	if !verifySignature(address, entry.Message(), signature) {
 		return LoginResult{}, ErrInvalidSignature
 	}
-	if err := s.consumeNonce(address); err != nil {
+	if err := s.consumeNonce(ctx, address); err != nil {
 		return LoginResult{}, err
 	}
 	user, err := s.users.FindByAddress(ctx, address)
@@ -158,25 +168,16 @@ func (s *Service) ParseToken(raw string) (Claims, error) {
 	return claims, nil
 }
 
-func (s *Service) getChallenge(address string) (SIWEChallenge, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.challengesByAddress[address]
-	if !ok || time.Now().After(entry.ExpirationTime) {
+func (s *Service) getChallenge(ctx context.Context, address string) (SIWEChallenge, error) {
+	entry, err := s.store.Get(ctx, address)
+	if err != nil || time.Now().After(entry.ExpirationTime) {
 		return SIWEChallenge{}, ErrInvalidNonce
 	}
 	return entry, nil
 }
 
-func (s *Service) consumeNonce(address string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.challengesByAddress[address]
-	if !ok || time.Now().After(entry.ExpirationTime) {
-		return ErrInvalidNonce
-	}
-	delete(s.challengesByAddress, address)
-	return nil
+func (s *Service) consumeNonce(ctx context.Context, address string) error {
+	return s.store.Delete(ctx, address)
 }
 
 func (s *Service) issueToken(user repository.User) (string, int64, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
 	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
+	"github.com/meme-launchpad/app-rebuild/internal/upload"
 )
 
 // NewHandler returns the complete HTTP surface implemented so far.
@@ -22,7 +23,11 @@ type TokenReader interface {
 	FindByAddress(context.Context, string) (repository.Token, error)
 }
 
-func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader, creation *tokencreation.Service) http.Handler {
+type Presigner interface {
+	Presign(folder, mimeType string, chainID int) (upload.PresignResult, error)
+}
+
+func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader, creation *tokencreation.Service, uploads Presigner) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", health(serviceName))
 	if tokens != nil {
@@ -36,8 +41,58 @@ func NewHandler(serviceName string, authService *auth.Service, tokens TokenReade
 		if creation != nil {
 			mux.HandleFunc("/api/v1/token/create", createToken(authService, creation))
 		}
+		if uploads != nil {
+			mux.HandleFunc("/api/v1/file/token-logo-presign", presignImage(authService, uploads, "token-logo"))
+			mux.HandleFunc("/api/v1/file/token-banner-presign", presignImage(authService, uploads, "token-banner"))
+			mux.HandleFunc("/api/v1/file/activity-image-presign", presignImage(authService, uploads, "activity-image"))
+			mux.HandleFunc("/api/v1/file/upload-confirm", uploadConfirm(authService))
+		}
 	}
 	return mux
+}
+
+func presignImage(authService *auth.Service, uploads Presigner, folder string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if _, ok := bearerClaims(w, r, authService); !ok {
+			return
+		}
+		mimeType := r.URL.Query().Get("mimeType")
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		chainID := 97
+		if raw := r.URL.Query().Get("chainId"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 {
+				writeError(w, "chainId must be positive", http.StatusBadRequest)
+				return
+			}
+			chainID = parsed
+		}
+		result, err := uploads.Presign(folder, mimeType, chainID)
+		if err != nil {
+			writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, result, http.StatusOK)
+	}
+}
+
+func uploadConfirm(authService *auth.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if _, ok := bearerClaims(w, r, authService); !ok {
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true}, http.StatusOK)
+	}
 }
 
 func createToken(authService *auth.Service, creation *tokencreation.Service) http.HandlerFunc {
@@ -136,7 +191,7 @@ func signMessage(service *auth.Service) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		result, err := service.RequestMessage(r.URL.Query().Get("address"))
+		result, err := service.RequestMessage(r.Context(), r.URL.Query().Get("address"))
 		if err != nil {
 			writeError(w, err, http.StatusBadRequest)
 			return

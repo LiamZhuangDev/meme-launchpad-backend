@@ -18,16 +18,20 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
 	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
+	"github.com/meme-launchpad/app-rebuild/internal/upload"
+	"github.com/redis/go-redis/v9"
 )
 
 // Application is the dependency container for one API process.
 type Application struct {
 	Config        config.Config
 	DB            *pgxpool.Pool
+	Redis         *redis.Client
 	Users         *repository.UserRepository
 	Tokens        *repository.TokenRepository
 	Auth          *auth.Service
 	TokenCreation *tokencreation.Service
+	Uploads       *upload.Service
 }
 
 // New opens the process-wide PostgreSQL pool and wires repositories to it.
@@ -42,16 +46,27 @@ func New(ctx context.Context, cfg config.Config) (*Application, error) {
 // NewWithPool is useful for tests and future commands that own an existing pool.
 func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 	application := &Application{Config: cfg, DB: pool}
+	if cfg.Redis.Addr != "" {
+		application.Redis = redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})
+	}
 	if pool != nil {
 		application.Users = repository.NewUserRepository(pool)
 		application.Tokens = repository.NewTokenRepository(pool)
-		application.Auth = auth.New(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE))
+		challengeStore := auth.ChallengeStore(auth.NewMemoryChallengeStore())
+		if application.Redis != nil {
+			challengeStore = auth.NewRedisChallengeStore(application.Redis, "")
+		}
+		application.Auth = auth.NewWithChallengeStore(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE), challengeStore)
 		application.TokenCreation = newTokenCreation(cfg, repository.NewTokenCreationRepository(pool))
 	}
+	application.Uploads = newUploadService(cfg)
 	return application
 }
 
 func (a *Application) Close() {
+	if a.Redis != nil {
+		_ = a.Redis.Close()
+	}
 	if a.DB != nil {
 		a.DB.Close()
 	}
@@ -60,9 +75,20 @@ func (a *Application) Close() {
 func (a *Application) HTTPServer() *http.Server {
 	return &http.Server{
 		Addr:              fmt.Sprintf(":%d", a.Config.HTTP.Port),
-		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens, a.TokenCreation),
+		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens, a.TokenCreation, a.Uploads),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func newUploadService(cfg config.Config) *upload.Service {
+	if cfg.COS.SecretID == "" && cfg.COS.SecretKey == "" && cfg.COS.Bucket == "" && cfg.COS.Region == "" && cfg.COS.Domain == "" {
+		return nil
+	}
+	service, err := upload.New(cfg.COS)
+	if err != nil {
+		return nil
+	}
+	return service
 }
 
 func newTokenCreation(cfg config.Config, store *repository.TokenCreationRepository) *tokencreation.Service {
