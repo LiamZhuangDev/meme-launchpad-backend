@@ -333,7 +333,26 @@ POST /api/v1/file/upload-confirm
 ```
 
 The presign routes require `Authorization: Bearer <JWT>`. They return a COS
-PUT URL for direct browser upload plus the future public URL.
+PUT URL for direct browser upload plus the future public URL. The backend only authorizes and signs the upload. It does not handle the image bytes.
+
+```
+Frontend asks backend:
+GET /api/v1/file/token-logo-presign
+
+Backend Presigner returns:
+{
+  "uploadUrl": "temporary signed COS PUT URL",
+  "publicUrl": "future image URL",
+  "key": "token-logo/97/abc.png",
+  "expiresAt": ..."
+}
+
+Frontend uploads image directly:
+PUT uploadUrl with image bytes
+
+Later app stores/uses publicUrl
+```
+
 
 Enable presigned uploads with Tencent COS-style settings:
 
