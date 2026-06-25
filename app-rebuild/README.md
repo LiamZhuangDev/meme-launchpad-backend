@@ -16,7 +16,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 5 — token read APIs and database models
 - [x] Step 6 — token-creation intent, CREATE2 prediction, and signing
 - [x] Step 7 — separate blockchain event indexer
-- [ ] Step 8 — event projections for tokens, trades, and K-lines
+- [x] Step 8 — event projections for tokens, trades, and K-lines
 - [ ] Step 9 — Redis nonce cache and presigned image uploads
 
 ## Step 1: run the foundation
@@ -259,3 +259,46 @@ because its `(chain_id, transaction_hash, log_index)` key is unique.
 This step deliberately stores raw topics and data without decoding them into
 the `tokens` table. Step 8 will be the explicit boundary that turns these raw,
 replayable chain facts into token, trade, and K-line read models.
+
+## Step 8: event projections for tokens, trades, and K-lines
+
+Apply the projection migration:
+
+```bash
+psql "$DATABASE_URL" -f migrations/005_create_event_projections.sql
+```
+
+The indexer now decodes these `MEMECore` events:
+
+```text
+TokenCreated -> token_created_events + tokens
+TokenBought  -> token_bought_events + trades + tokens + klines
+TokenSold    -> token_sold_events + trades + tokens + klines
+TokenGraduated -> token_graduated_events + tokens.status
+```
+
+The important boundary is still the same: the API reads query-friendly tables,
+and the indexer is the only process that turns chain facts into those tables.
+
+```text
+MEMECore log
+  -> raw chain_events row
+  -> decoded event row
+  -> public read models: tokens, trades, klines
+  -> checkpoint advance
+```
+
+Those writes happen in one PostgreSQL transaction. If a log is saved but a
+projection fails, the checkpoint is not advanced; on retry the same chain range
+is read again. Re-reading is safe because event tables and trades use unique
+transaction/log keys, and K-lines are only updated when a new trade row is
+inserted.
+
+K-line candles are built for `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, and
+`1w`. Price is calculated from each bonding-curve trade as:
+
+```text
+price = bnbAmount / tokenAmount
+```
+
+with 18 decimal places.
