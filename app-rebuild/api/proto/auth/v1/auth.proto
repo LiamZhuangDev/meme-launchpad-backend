@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package meme.auth.v1;
+
+option go_package = "github.com/meme-launchpad/app-rebuild/gen/auth/v1;authv1";
+
+import "google/protobuf/timestamp.proto";
+
+service AuthService {
+  rpc RequestSignMessage(RequestSignMessageRequest) returns (RequestSignMessageResponse);
+  rpc WalletLogin(WalletLoginRequest) returns (WalletLoginResponse);
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
+}
+
+message RequestSignMessageRequest {
+  string address = 1;
+}
+
+message RequestSignMessageResponse {
+  string message = 1;
+  string nonce = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message WalletLoginRequest {
+  string address = 1;
+  string signature = 2;
+}
+
+message WalletLoginResponse {
+  string token = 1;
+  User user = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message GetCurrentUserRequest {}
+
+message GetCurrentUserResponse {
+  int64 user_id = 1;
+  string address = 2;
+  google.protobuf.Timestamp issued_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message User {
+  int64 id = 1;
+  string address = 2;
+  string username = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}

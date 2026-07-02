@@ -8,16 +8,27 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-// NewServer creates the gRPC transport. Business services will be registered
-// here one vertical slice at a time while the REST API remains available.
-func NewServer(serviceName string, tokens TokenReader) *grpc.Server {
+// Dependencies contains the application capabilities exposed over gRPC.
+// Each transport owns its interfaces while sharing the concrete services and
+// repositories assembled by internal/app.
+type Dependencies struct {
+	Tokens TokenReader
+	Auth   Authenticator
+}
+
+// NewServer creates the gRPC transport. Business services are registered here
+// one vertical slice at a time while the REST API remains available.
+func NewServer(serviceName string, dependencies Dependencies) *grpc.Server {
 	server := grpc.NewServer()
 	healthService := health.NewServer()
 	healthService.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	healthService.SetServingStatus(serviceName, healthpb.HealthCheckResponse_SERVING)
 	healthpb.RegisterHealthServer(server, healthService)
-	if tokens != nil {
-		registerTokenService(server, tokens)
+	if dependencies.Tokens != nil {
+		registerTokenService(server, dependencies.Tokens)
+	}
+	if dependencies.Auth != nil {
+		registerAuthService(server, dependencies.Auth)
 	}
 	reflection.Register(server)
 	return server

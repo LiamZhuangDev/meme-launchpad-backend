@@ -20,7 +20,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 9 — Redis nonce cache and presigned image uploads
 - [x] Step 10.1 — parallel gRPC server and standard health service
 - [x] Step 10.2 — protobuf contracts and gRPC token read service
-- [ ] Step 10.3 — gRPC wallet authentication
+- [x] Step 10.3 — gRPC wallet authentication
 - [ ] Step 10.4 — gRPC token creation and upload authorization
 - [ ] Step 10.5 — transport parity tests and REST migration decision
 
@@ -81,13 +81,50 @@ handler never creates a database connection itself.
 
 Set `DATABASE_URL` to a PostgreSQL connection string. Its safe local default
 is `postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable`.
-Create the `users` table before starting the API:
+
+For a reproducible local setup, start PostgreSQL in Docker from the
+`app-rebuild` directory:
+
+```bash
+docker run --name meme-launchpad-postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=meme_launchpad \
+  -p 5432:5432 \
+  -v meme-launchpad-postgres-data:/var/lib/postgresql/data \
+  -d postgres:16-alpine
+```
+
+The named volume preserves the database when the container stops. Wait until
+PostgreSQL reports that it is ready:
+
+```bash
+docker exec meme-launchpad-postgres pg_isready -U postgres
+```
+
+Apply the Step 3 migration and start the API:
 
 ```bash
 export DATABASE_URL='postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable'
-createdb meme_launchpad
-psql "$DATABASE_URL" -f migrations/001_create_users.sql
+docker exec -i meme-launchpad-postgres \
+  psql -U postgres -d meme_launchpad < migrations/001_create_users.sql
 go run ./cmd/api
+```
+
+Later checkpoints add more migrations; Step 3 intentionally creates only the
+`users` table. On later development sessions, restart the existing container
+instead of running `docker run` again:
+
+```bash
+docker start meme-launchpad-postgres
+```
+
+If the API reports `connect: connection refused`, verify the container and
+inspect its logs:
+
+```bash
+docker ps --filter name=meme-launchpad-postgres
+docker logs meme-launchpad-postgres
 ```
 
 `UserRepository` currently contains only two operations: `FindByAddress` and
@@ -456,15 +493,90 @@ grpcurl -plaintext \
   localhost:39090 meme.token.v1.TokenService/GetToken
 ```
 
+The runtime flow is:
+```
+grpcurl
+  → localhost:39090
+  → TokenService.ListTokens
+  → grpcapi.tokenService.ListTokens()
+  → TokenRepository.List(limit=5, offset=5)
+  → PostgreSQL
+  → Protobuf response
+```
+
 Regenerate the checked-in Go types after changing the protobuf contract:
 
 ```bash
-protoc -I api/proto -I /usr/include \
+protoc -I api/proto \
   --go_out=. --go_opt=module=github.com/meme-launchpad/app-rebuild \
   --go-grpc_out=. --go-grpc_opt=module=github.com/meme-launchpad/app-rebuild \
   api/proto/token/v1/token.proto
 ```
 
 This checkpoint does not remove, proxy, or modify either existing REST token
-handler. Step 10.3 will add wallet authentication as the next parallel gRPC
-vertical slice.
+handler. The next section applies the same parallel approach to authentication.
+
+## Step 10.3: parallel gRPC wallet authentication
+
+`api/proto/auth/v1/auth.proto` defines a parallel gRPC boundary over the same
+`auth.Service` used by REST:
+
+| REST | gRPC |
+| --- | --- |
+| `GET /api/v1/user/sign-msg?address=0x...` | `meme.auth.v1.AuthService/RequestSignMessage` |
+| `POST /api/v1/user/wallet-login` | `meme.auth.v1.AuthService/WalletLogin` |
+| `GET /api/v1/user/me` | `meme.auth.v1.AuthService/GetCurrentUser` |
+
+Both transports execute the same security flow: create and store a
+server-issued SIWE challenge, verify its fields and wallet signature, consume
+the nonce, find or create the user, and issue a JWT. Only the transport code
+is different:
+
+```text
+REST auth handler ----+
+                      +--> auth.Service --> ChallengeStore + UserRepository
+gRPC auth method -----+
+```
+
+Request the message that the wallet must sign:
+
+```bash
+grpcurl -plaintext \
+  -d '{"address":"0xYourWalletAddress"}' \
+  localhost:39090 meme.auth.v1.AuthService/RequestSignMessage
+```
+
+After the wallet signs the returned `message`, exchange the signature for a
+JWT:
+
+```bash
+grpcurl -plaintext \
+  -d '{"address":"0xYourWalletAddress","signature":"0xWalletSignature"}' \
+  localhost:39090 meme.auth.v1.AuthService/WalletLogin
+```
+
+REST receives the JWT in an HTTP `Authorization` header. gRPC carries the same
+header value as request metadata:
+
+```bash
+export JWT='token-returned-by-WalletLogin'
+
+grpcurl -plaintext \
+  -H "authorization: Bearer $JWT" \
+  -d '{}' \
+  localhost:39090 meme.auth.v1.AuthService/GetCurrentUser
+```
+
+Regenerate the auth messages and service interfaces after editing the contract:
+
+```bash
+protoc -I api/proto \
+  --go_out=. --go_opt=module=github.com/meme-launchpad/app-rebuild \
+  --go-grpc_out=. --go-grpc_opt=module=github.com/meme-launchpad/app-rebuild \
+  api/proto/auth/v1/auth.proto
+```
+
+The gRPC boundary maps malformed addresses to `InvalidArgument`, invalid or
+replayed signatures to `Unauthenticated`, and unexpected storage failures to
+`Internal`. Existing REST routes remain unchanged. Step 10.4 will add token
+creation and upload authorization as parallel gRPC methods.

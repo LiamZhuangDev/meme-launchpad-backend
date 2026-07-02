@@ -94,7 +94,7 @@ func TestTokenServiceValidatesRequestsAndMapsNotFound(t *testing.T) {
 func tokenClient(t *testing.T, tokens TokenReader) tokenv1.TokenServiceClient {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
-	server := NewServer("test-api", tokens)
+	server := NewServer("test-api", Dependencies{Tokens: tokens})
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 
