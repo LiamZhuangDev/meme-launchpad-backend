@@ -14,6 +14,7 @@ import (
 const (
 	defaultServiceName = "meme-launchpad-rebuild-api"
 	defaultHTTPPort    = 38081
+	defaultGRPCPort    = 39090
 	defaultDatabaseURL = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
 )
 
@@ -22,6 +23,7 @@ const (
 type Config struct {
 	ServiceName   string
 	HTTP          HTTPConfig
+	GRPC          GRPCConfig
 	Database      DatabaseConfig
 	Redis         RedisConfig
 	Auth          AuthConfig
@@ -31,6 +33,10 @@ type Config struct {
 }
 
 type HTTPConfig struct {
+	Port int
+}
+
+type GRPCConfig struct {
 	Port int
 }
 
@@ -95,6 +101,9 @@ func Load(lookup LookupEnv) (Config, error) {
 		HTTP: HTTPConfig{
 			Port: defaultHTTPPort,
 		},
+		GRPC: GRPCConfig{
+			Port: defaultGRPCPort,
+		},
 		Database: DatabaseConfig{
 			URL: defaultDatabaseURL,
 		},
@@ -115,6 +124,13 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("HTTP_PORT must be an integer from 1 to 65535")
 		}
 		config.HTTP.Port = port
+	}
+	if rawPort, ok := lookup("GRPC_PORT"); ok && rawPort != "" {
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return Config{}, fmt.Errorf("GRPC_PORT must be an integer from 1 to 65535")
+		}
+		config.GRPC.Port = port
 	}
 
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {

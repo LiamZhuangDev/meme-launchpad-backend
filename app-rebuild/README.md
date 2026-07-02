@@ -18,6 +18,11 @@ The original backend is not imported or modified by this project.
 - [x] Step 7 — separate blockchain event indexer
 - [x] Step 8 — event projections for tokens, trades, and K-lines
 - [x] Step 9 — Redis nonce cache and presigned image uploads
+- [x] Step 10.1 — parallel gRPC server and standard health service
+- [ ] Step 10.2 — protobuf contracts and gRPC token read service
+- [ ] Step 10.3 — gRPC wallet authentication
+- [ ] Step 10.4 — gRPC token creation and upload authorization
+- [ ] Step 10.5 — transport parity tests and REST migration decision
 
 ## Step 1: run the foundation
 
@@ -382,3 +387,34 @@ Then call a presign endpoint with the JWT returned by wallet login:
 curl 'http://localhost:38081/api/v1/file/token-logo-presign?mimeType=image/png&chainId=97' \
   -H "Authorization: Bearer $JWT"
 ```
+
+## Step 10.1: parallel gRPC foundation
+
+The API process now listens on two transport ports while sharing one
+application dependency container:
+
+```text
+HTTP/JSON :38081 -> existing REST handlers
+gRPC      :39090 -> standard grpc.health.v1.Health service
+```
+
+This checkpoint deliberately keeps every existing REST route unchanged. It
+proves gRPC startup, service reflection, client calls, and graceful shutdown
+before business methods are moved. Configure the gRPC listener with
+`GRPC_PORT`; its default is `39090`.
+
+With `grpcurl` installed, query the standard health contract:
+
+```bash
+grpcurl -plaintext -d '{"service":"meme-launchpad-rebuild-api"}' \
+  localhost:39090 grpc.health.v1.Health/Check
+```
+
+Expected status:
+
+```json
+{"status":"SERVING"}
+```
+
+Step 10.2 will introduce the first project-owned protobuf contract and migrate
+the public token list/detail reads as one vertical slice.

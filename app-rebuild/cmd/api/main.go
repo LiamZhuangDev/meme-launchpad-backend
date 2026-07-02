@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,21 +31,49 @@ func main() {
 	}
 	defer application.Close()
 	server := application.HTTPServer()
+	grpcServer := application.GRPCServer()
+	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPC.Port))
+	if err != nil {
+		log.Fatalf("listen for gRPC: %v", err)
+	}
+
+	serverErrors := make(chan error, 2)
 
 	go func() {
 		log.Printf("%s listening on http://localhost:%d", cfg.ServiceName, cfg.HTTP.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("API server failed: %v", err)
+			serverErrors <- fmt.Errorf("HTTP server: %w", err)
+		}
+	}()
+	go func() {
+		log.Printf("%s listening with gRPC on localhost:%d", cfg.ServiceName, cfg.GRPC.Port)
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			serverErrors <- fmt.Errorf("gRPC server: %w", err)
 		}
 	}()
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	<-signals
+	select {
+	case <-signals:
+	case err := <-serverErrors:
+		log.Printf("server failed: %v", err)
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
+	}
+
+	grpcStopped := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(grpcStopped)
+	}()
+	select {
+	case <-grpcStopped:
+	case <-shutdownCtx.Done():
+		grpcServer.Stop()
 	}
 }

@@ -27,3 +27,13 @@ func TestHTTPServerUsesConfiguration(t *testing.T) {
 		t.Fatalf("body = %q", recorder.Body.String())
 	}
 }
+
+func TestGRPCServerIsConfigured(t *testing.T) {
+	application := NewWithPool(config.Config{ServiceName: "test-api"}, nil)
+	server := application.GRPCServer()
+	t.Cleanup(server.Stop)
+
+	if _, ok := server.GetServiceInfo()["grpc.health.v1.Health"]; !ok {
+		t.Fatal("standard gRPC health service is not registered")
+	}
+}

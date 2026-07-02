@@ -15,11 +15,13 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/config"
 	"github.com/meme-launchpad/app-rebuild/internal/database"
+	"github.com/meme-launchpad/app-rebuild/internal/grpcapi"
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
 	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
 	"github.com/meme-launchpad/app-rebuild/internal/upload"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
 )
 
 // Application is the dependency container for one API process.
@@ -78,6 +80,10 @@ func (a *Application) HTTPServer() *http.Server {
 		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens, a.TokenCreation, a.Uploads),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func (a *Application) GRPCServer() *grpc.Server {
+	return grpcapi.NewServer(a.Config.ServiceName)
 }
 
 func newUploadService(cfg config.Config) *upload.Service {
