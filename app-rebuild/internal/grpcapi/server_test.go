@@ -13,7 +13,7 @@ import (
 
 func TestHealthCheckReportsServing(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
-	server := NewServer("test-api")
+	server := NewServer("test-api", nil)
 	go func() {
 		_ = server.Serve(listener)
 	}()

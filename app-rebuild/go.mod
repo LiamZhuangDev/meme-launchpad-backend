@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.5.3
 	github.com/redis/go-redis/v9 v9.4.0
 	google.golang.org/grpc v1.61.0
+	google.golang.org/protobuf v1.31.0
 )
 
 require (
@@ -44,6 +45,5 @@ require (
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )

@@ -83,7 +83,10 @@ func (a *Application) HTTPServer() *http.Server {
 }
 
 func (a *Application) GRPCServer() *grpc.Server {
-	return grpcapi.NewServer(a.Config.ServiceName)
+	if a.Tokens == nil {
+		return grpcapi.NewServer(a.Config.ServiceName, nil)
+	}
+	return grpcapi.NewServer(a.Config.ServiceName, a.Tokens)
 }
 
 func newUploadService(cfg config.Config) *upload.Service {

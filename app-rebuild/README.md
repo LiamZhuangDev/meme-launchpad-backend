@@ -19,7 +19,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 8 — event projections for tokens, trades, and K-lines
 - [x] Step 9 — Redis nonce cache and presigned image uploads
 - [x] Step 10.1 — parallel gRPC server and standard health service
-- [ ] Step 10.2 — protobuf contracts and gRPC token read service
+- [x] Step 10.2 — protobuf contracts and gRPC token read service
 - [ ] Step 10.3 — gRPC wallet authentication
 - [ ] Step 10.4 — gRPC token creation and upload authorization
 - [ ] Step 10.5 — transport parity tests and REST migration decision
@@ -416,5 +416,55 @@ Expected status:
 {"status":"SERVING"}
 ```
 
-Step 10.2 will introduce the first project-owned protobuf contract and migrate
-the public token list/detail reads as one vertical slice.
+## Step 10.2: parallel gRPC token reads
+
+The first project-owned contract is
+`api/proto/token/v1/token.proto`. Its generated Go client, messages, and server
+interfaces live under `gen/token/v1`. Two RPCs now run beside the unchanged
+REST routes:
+
+| REST | gRPC |
+| --- | --- |
+| `GET /api/v1/token/list?page=2&pageSize=5` | `meme.token.v1.TokenService/ListTokens` |
+| `GET /api/v1/token/detail?address=0x...` | `meme.token.v1.TokenService/GetToken` |
+
+The handlers are separate so their transport concerns are easy to compare,
+but both depend on the same repository:
+
+```text
+REST tokenList handler ---------+
+                                +--> TokenRepository --> PostgreSQL tokens
+gRPC ListTokens method ---------+
+```
+
+Compare `internal/httpapi/server.go` with `internal/grpcapi/token.go`:
+
+- REST reads URL query parameters and writes JSON plus HTTP status codes.
+- gRPC receives generated request messages and returns generated response
+  messages plus gRPC status codes.
+- Both convert page 2 with page size 5 into repository arguments
+  `limit = 5, offset = 5`.
+
+Call the gRPC methods through reflection:
+
+```bash
+grpcurl -plaintext -d '{"page":2,"pageSize":5}' \
+  localhost:39090 meme.token.v1.TokenService/ListTokens
+
+grpcurl -plaintext \
+  -d '{"contractAddress":"0x1111111111111111111111111111111111111111"}' \
+  localhost:39090 meme.token.v1.TokenService/GetToken
+```
+
+Regenerate the checked-in Go types after changing the protobuf contract:
+
+```bash
+protoc -I api/proto -I /usr/include \
+  --go_out=. --go_opt=module=github.com/meme-launchpad/app-rebuild \
+  --go-grpc_out=. --go-grpc_opt=module=github.com/meme-launchpad/app-rebuild \
+  api/proto/token/v1/token.proto
+```
+
+This checkpoint does not remove, proxy, or modify either existing REST token
+handler. Step 10.3 will add wallet authentication as the next parallel gRPC
+vertical slice.
