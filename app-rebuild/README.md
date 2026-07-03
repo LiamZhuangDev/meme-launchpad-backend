@@ -24,7 +24,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 10.4 — gRPC token creation and upload authorization
 - [x] Step 10.5 — transport parity tests and permanent dual transports
 - [x] Step 11.1 — public REST and loopback-only internal gRPC listeners
-- [ ] Step 11.2 — internal Go service client
+- [x] Step 11.2 — internal Go service client
 - [ ] Step 11.3 — private-network TLS and service identity
 
 ## Step 1: run the foundation
@@ -745,5 +745,58 @@ Internet --> ingress --> REST 0.0.0.0:38081
 Internal private network --> gRPC 0.0.0.0:39090
 ```
 
-Step 11.2 will add an actual internal Go client command that consumes the
-generated gRPC API instead of using `grpcurl`.
+## Step 11.2: internal Go service client
+
+`cmd/internal-client` is a separate Go process representing an internal
+service. It does not call REST or manually construct HTTP/2 requests. It uses
+the generated `TokenServiceClient` through a small reusable wrapper in
+`internal/grpcclient`:
+
+```text
+cmd/internal-client
+  -> grpcclient.Client
+  -> generated TokenServiceClient
+  -> internal gRPC listener :39090
+  -> grpcapi token handler
+  -> TokenRepository
+```
+
+Start the API first:
+
+```bash
+go run ./cmd/api
+```
+
+In another terminal, run the internal client:
+
+```bash
+go run ./cmd/internal-client
+```
+
+It checks the standard gRPC health service, calls `ListTokens` with page 1 and
+page size 20, and prints the Protobuf response as readable JSON. Configure it
+with:
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `INTERNAL_GRPC_TARGET` | `127.0.0.1:39090` | Internal API gRPC address |
+| `INTERNAL_GRPC_TIMEOUT` | `5s` | Overall connect and RPC deadline |
+| `TOKEN_PAGE` | `1` | Token page to request |
+| `TOKEN_PAGE_SIZE` | `20` | Tokens per page |
+
+For example:
+
+```bash
+TOKEN_PAGE=2 TOKEN_PAGE_SIZE=5 go run ./cmd/internal-client
+```
+
+For container-to-container traffic, use the API's private DNS name while the
+server uses `GRPC_HOST=0.0.0.0`:
+
+```bash
+INTERNAL_GRPC_TARGET=meme-api:39090 go run ./cmd/internal-client
+```
+
+This checkpoint intentionally uses plaintext transport credentials because
+the default listener is loopback-only. Step 11.3 will replace that assumption
+with TLS and explicit internal service identity for private-network traffic.
