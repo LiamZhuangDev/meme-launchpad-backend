@@ -2,18 +2,14 @@ package grpcapi
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	tokenv1 "github.com/meme-launchpad/app-rebuild/gen/token/v1"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 type fakeTokenReader struct {
@@ -93,20 +89,5 @@ func TestTokenServiceValidatesRequestsAndMapsNotFound(t *testing.T) {
 
 func tokenClient(t *testing.T, tokens TokenReader) tokenv1.TokenServiceClient {
 	t.Helper()
-	listener := bufconn.Listen(1024 * 1024)
-	server := NewServer("test-api", Dependencies{Tokens: tokens})
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
-
-	connection, err := grpc.DialContext(
-		context.Background(),
-		"bufnet",
-		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial gRPC server: %v", err)
-	}
-	t.Cleanup(func() { _ = connection.Close() })
-	return tokenv1.NewTokenServiceClient(connection)
+	return tokenv1.NewTokenServiceClient(testConnection(t, Dependencies{Tokens: tokens}))
 }

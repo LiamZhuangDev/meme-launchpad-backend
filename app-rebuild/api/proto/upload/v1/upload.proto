@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package meme.upload.v1;
+
+option go_package = "github.com/meme-launchpad/app-rebuild/gen/upload/v1;uploadv1";
+
+import "google/protobuf/timestamp.proto";
+
+service UploadService {
+  rpc PresignImage(PresignImageRequest) returns (PresignImageResponse);
+  rpc ConfirmUpload(ConfirmUploadRequest) returns (ConfirmUploadResponse);
+}
+
+enum ImageKind {
+  IMAGE_KIND_UNSPECIFIED = 0;
+  IMAGE_KIND_TOKEN_LOGO = 1;
+  IMAGE_KIND_TOKEN_BANNER = 2;
+  IMAGE_KIND_ACTIVITY_IMAGE = 3;
+}
+
+message PresignImageRequest {
+  ImageKind kind = 1;
+  string mime_type = 2;
+  optional int32 chain_id = 3;
+}
+
+message PresignImageResponse {
+  string upload_url = 1;
+  string public_url = 2;
+  string file_name = 3;
+  string key = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// Step 10.4 mirrors the REST placeholder. Object verification and metadata
+// persistence remain a future application-level checkpoint.
+message ConfirmUploadRequest {}
+
+message ConfirmUploadResponse {
+  bool ok = 1;
+}

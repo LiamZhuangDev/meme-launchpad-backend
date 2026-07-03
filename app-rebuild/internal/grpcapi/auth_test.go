@@ -3,7 +3,6 @@ package grpcapi
 import (
 	"context"
 	"fmt"
-	"net"
 	"testing"
 	"time"
 
@@ -13,12 +12,9 @@ import (
 	authv1 "github.com/meme-launchpad/app-rebuild/gen/auth/v1"
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 type fakeAuthUsers struct{ user repository.User }
@@ -98,20 +94,5 @@ func TestAuthServiceMapsInvalidInputAndMissingToken(t *testing.T) {
 
 func authClient(t *testing.T, authenticator Authenticator) authv1.AuthServiceClient {
 	t.Helper()
-	listener := bufconn.Listen(1024 * 1024)
-	server := NewServer("test-api", Dependencies{Auth: authenticator})
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
-
-	connection, err := grpc.DialContext(
-		context.Background(),
-		"bufnet",
-		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial gRPC server: %v", err)
-	}
-	t.Cleanup(func() { _ = connection.Close() })
-	return authv1.NewAuthServiceClient(connection)
+	return authv1.NewAuthServiceClient(testConnection(t, Dependencies{Auth: authenticator}))
 }

@@ -5,6 +5,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -38,5 +39,28 @@ func TestHealthCheckReportsServing(t *testing.T) {
 	}
 	if response.Status != healthpb.HealthCheckResponse_SERVING {
 		t.Fatalf("status = %s, want SERVING", response.Status)
+	}
+}
+
+func TestServerRegistersEveryParallelApplicationService(t *testing.T) {
+	server := NewServer("test-api", Dependencies{
+		Tokens:        &fakeTokenReader{},
+		Auth:          auth.New(nil, "test-secret", auth.SIWEConfig{}),
+		TokenCreation: &fakeTokenCreator{},
+		Uploads:       &fakeUploadPresigner{},
+	})
+	t.Cleanup(server.Stop)
+
+	services := server.GetServiceInfo()
+	for _, name := range []string{
+		"grpc.health.v1.Health",
+		"meme.token.v1.TokenService",
+		"meme.auth.v1.AuthService",
+		"meme.tokencreation.v1.TokenCreationService",
+		"meme.upload.v1.UploadService",
+	} {
+		if _, ok := services[name]; !ok {
+			t.Errorf("gRPC service %q is not registered", name)
+		}
 	}
 }

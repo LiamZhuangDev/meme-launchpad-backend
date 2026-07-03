@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package meme.tokencreation.v1;
+
+option go_package = "github.com/meme-launchpad/app-rebuild/gen/tokencreation/v1;tokencreationv1";
+
+service TokenCreationService {
+  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
+}
+
+message CreateTokenRequest {
+  string name = 1;
+  string symbol = 2;
+  uint64 launch_time = 3;
+  uint64 initial_buy_percentage = 4;
+}
+
+message CreateTokenResponse {
+  string create_arg = 1;
+  string signature = 2;
+  string request_id = 3;
+  string create2_salt = 4;
+  string predicted_address = 5;
+  uint64 nonce = 6;
+  uint64 timestamp = 7;
+}

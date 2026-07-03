@@ -12,8 +12,10 @@ import (
 // Each transport owns its interfaces while sharing the concrete services and
 // repositories assembled by internal/app.
 type Dependencies struct {
-	Tokens TokenReader
-	Auth   Authenticator
+	Tokens        TokenReader
+	Auth          Authenticator
+	TokenCreation TokenCreator
+	Uploads       UploadPresigner
 }
 
 // NewServer creates the gRPC transport. Business services are registered here
@@ -29,6 +31,12 @@ func NewServer(serviceName string, dependencies Dependencies) *grpc.Server {
 	}
 	if dependencies.Auth != nil {
 		registerAuthService(server, dependencies.Auth)
+		if dependencies.TokenCreation != nil {
+			registerTokenCreationService(server, dependencies.Auth, dependencies.TokenCreation)
+		}
+		if dependencies.Uploads != nil {
+			registerUploadService(server, dependencies.Auth, dependencies.Uploads)
+		}
 	}
 	reflection.Register(server)
 	return server

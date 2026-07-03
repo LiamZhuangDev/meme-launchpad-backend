@@ -21,8 +21,8 @@ The original backend is not imported or modified by this project.
 - [x] Step 10.1 — parallel gRPC server and standard health service
 - [x] Step 10.2 — protobuf contracts and gRPC token read service
 - [x] Step 10.3 — gRPC wallet authentication
-- [ ] Step 10.4 — gRPC token creation and upload authorization
-- [ ] Step 10.5 — transport parity tests and REST migration decision
+- [x] Step 10.4 — gRPC token creation and upload authorization
+- [x] Step 10.5 — transport parity tests and permanent dual transports
 
 ## Step 1: run the foundation
 
@@ -578,5 +578,113 @@ protoc -I api/proto \
 
 The gRPC boundary maps malformed addresses to `InvalidArgument`, invalid or
 replayed signatures to `Unauthenticated`, and unexpected storage failures to
-`Internal`. Existing REST routes remain unchanged. Step 10.4 will add token
-creation and upload authorization as parallel gRPC methods.
+`Internal`. Existing REST routes remain unchanged. The next section applies
+the same authenticated transport pattern to creation and uploads.
+
+## Step 10.4: parallel token creation and upload authorization
+
+Two more project-owned gRPC services now sit beside the existing REST routes:
+
+| REST | gRPC |
+| --- | --- |
+| `POST /api/v1/token/create` | `meme.tokencreation.v1.TokenCreationService/CreateToken` |
+| Three `/api/v1/file/*-presign` routes | `meme.upload.v1.UploadService/PresignImage` with an `ImageKind` enum |
+| `POST /api/v1/file/upload-confirm` | `meme.upload.v1.UploadService/ConfirmUpload` |
+
+Both gRPC handlers require `authorization: Bearer <JWT>` metadata. Token
+creation takes the creator address only from verified JWT claims; there is no
+creator field in `CreateTokenRequest` that a client could spoof.
+
+```text
+gRPC metadata JWT
+  -> recover authenticated wallet
+  -> tokencreation.Service.Create
+  -> persist signed intent
+  -> return contract data + signature + predicted address
+```
+
+With token-creation configuration enabled, create an intent using the JWT from
+Step 10.3:
+
+```bash
+grpcurl -plaintext \
+  -H "authorization: Bearer $JWT" \
+  -d '{"name":"Meme Coin","symbol":"MEME","launchTime":"0","initialBuyPercentage":"1000"}' \
+  localhost:39090 meme.tokencreation.v1.TokenCreationService/CreateToken
+```
+
+With COS configuration enabled, request a presigned upload URL:
+
+```bash
+grpcurl -plaintext \
+  -H "authorization: Bearer $JWT" \
+  -d '{"kind":"IMAGE_KIND_TOKEN_LOGO","mimeType":"image/png","chainId":97}' \
+  localhost:39090 meme.upload.v1.UploadService/PresignImage
+```
+
+`ImageKind` replaces three nearly identical route handlers with one typed gRPC
+method. It maps to the same storage folders: `token-logo`, `token-banner`, and
+`activity-image`.
+
+`ConfirmUpload` intentionally remains the same authenticated acknowledgment as
+the REST placeholder:
+
+```bash
+grpcurl -plaintext \
+  -H "authorization: Bearer $JWT" \
+  -d '{}' \
+  localhost:39090 meme.upload.v1.UploadService/ConfirmUpload
+```
+
+Regenerate both services after editing their protobuf contracts:
+
+```bash
+protoc -I api/proto \
+  --go_out=. --go_opt=module=github.com/meme-launchpad/app-rebuild \
+  --go-grpc_out=. --go-grpc_opt=module=github.com/meme-launchpad/app-rebuild \
+  api/proto/tokencreation/v1/token_creation.proto \
+  api/proto/upload/v1/upload.proto
+```
+
+The token-creation service is registered only when all `TOKEN_CREATION_*`
+settings are present. The upload service is registered only when the required
+`COS_*` settings are present. Existing REST routes remain unchanged.
+
+## Step 10.5: verified parity and permanent REST plus gRPC
+
+The architecture decision is to keep both transports. REST is not deprecated,
+proxied through gRPC, or scheduled for removal. The same application process
+continues to serve:
+
+```text
+Frontend / HTTP client --> REST handlers :38081 --+
+                                                   +--> shared services and repositories
+Internal / gRPC client --> gRPC handlers :39090 --+
+```
+
+Cross-transport tests now prove the important semantic boundaries rather than
+requiring byte-for-byte JSON and Protobuf responses:
+
+- page 2 with page size 5 becomes repository `limit=5, offset=5` in both;
+- the same JWT resolves to the same user ID and wallet address in both;
+- token creation binds the same authenticated wallet as creator in both;
+- upload kind, MIME type, and chain ID reach the presigner identically;
+- a registration test verifies health, token, auth, token-creation, and upload
+  gRPC services are all exposed when their dependencies are configured.
+
+Run the final transport suite:
+
+```bash
+go test ./internal/grpcapi -run 'Parity|RegistersEvery' -v
+```
+
+Or verify the complete API, generated contracts, and internal packages:
+
+```bash
+go test ./cmd/api ./gen/... ./internal/...
+```
+
+At this checkpoint every REST capability in `app-rebuild` has a parallel gRPC
+surface. `upload-confirm` is still only an authenticated acknowledgment in
+both transports; object verification and metadata persistence are a future
+application feature, not unfinished gRPC transport work.

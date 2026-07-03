@@ -89,6 +89,12 @@ func (a *Application) GRPCServer() *grpc.Server {
 	}
 	if a.Auth != nil {
 		dependencies.Auth = a.Auth
+		if a.TokenCreation != nil {
+			dependencies.TokenCreation = a.TokenCreation
+		}
+		if a.Uploads != nil {
+			dependencies.Uploads = a.Uploads
+		}
 	}
 	return grpcapi.NewServer(a.Config.ServiceName, dependencies)
 }
