@@ -3,7 +3,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -76,7 +75,7 @@ func (a *Application) Close() {
 
 func (a *Application) HTTPServer() *http.Server {
 	return &http.Server{
-		Addr:              fmt.Sprintf(":%d", a.Config.HTTP.Port),
+		Addr:              a.Config.HTTP.Address(),
 		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens, a.TokenCreation, a.Uploads),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

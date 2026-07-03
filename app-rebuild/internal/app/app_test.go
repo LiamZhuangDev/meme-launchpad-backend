@@ -11,12 +11,12 @@ import (
 func TestHTTPServerUsesConfiguration(t *testing.T) {
 	application := NewWithPool(config.Config{
 		ServiceName: "test-api",
-		HTTP:        config.HTTPConfig{Port: 48080},
+		HTTP:        config.HTTPConfig{Host: "127.0.0.1", Port: 48080},
 	}, nil)
 
 	server := application.HTTPServer()
-	if server.Addr != ":48080" {
-		t.Fatalf("Addr = %q, want :48080", server.Addr)
+	if server.Addr != "127.0.0.1:48080" {
+		t.Fatalf("Addr = %q, want 127.0.0.1:48080", server.Addr)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)

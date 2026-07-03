@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -13,13 +14,15 @@ import (
 
 const (
 	defaultServiceName = "meme-launchpad-rebuild-api"
+	defaultHTTPHost    = "0.0.0.0"
 	defaultHTTPPort    = 38081
+	defaultGRPCHost    = "127.0.0.1"
 	defaultGRPCPort    = 39090
 	defaultDatabaseURL = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
 )
 
-// Config contains only the configuration Step 2 needs. Future steps will add
-// database, Redis, and chain settings here when their clients are introduced.
+// Config contains the process configuration shared by the API and indexer
+// composition roots.
 type Config struct {
 	ServiceName   string
 	HTTP          HTTPConfig
@@ -33,12 +36,17 @@ type Config struct {
 }
 
 type HTTPConfig struct {
+	Host string
 	Port int
 }
 
 type GRPCConfig struct {
+	Host string
 	Port int
 }
+
+func (c HTTPConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
+func (c GRPCConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 
 type DatabaseConfig struct {
 	URL string
@@ -93,15 +101,18 @@ type LookupEnv func(string) (string, bool)
 // Load reads optional environment variables and validates their values.
 //
 // APP_NAME defaults to meme-launchpad-rebuild-api.
-// HTTP_PORT defaults to 38081 and must be a valid TCP port.
+// HTTP_HOST defaults to 0.0.0.0 and HTTP_PORT defaults to 38081.
+// GRPC_HOST defaults to 127.0.0.1 and GRPC_PORT defaults to 39090.
 // DATABASE_URL defaults to a local development PostgreSQL database.
 func Load(lookup LookupEnv) (Config, error) {
 	config := Config{
 		ServiceName: defaultServiceName,
 		HTTP: HTTPConfig{
+			Host: defaultHTTPHost,
 			Port: defaultHTTPPort,
 		},
 		GRPC: GRPCConfig{
+			Host: defaultGRPCHost,
 			Port: defaultGRPCPort,
 		},
 		Database: DatabaseConfig{
@@ -116,6 +127,12 @@ func Load(lookup LookupEnv) (Config, error) {
 
 	if name, ok := lookup("APP_NAME"); ok && name != "" {
 		config.ServiceName = name
+	}
+	if host, ok := lookup("HTTP_HOST"); ok && host != "" {
+		config.HTTP.Host = host
+	}
+	if host, ok := lookup("GRPC_HOST"); ok && host != "" {
+		config.GRPC.Host = host
 	}
 
 	if rawPort, ok := lookup("HTTP_PORT"); ok && rawPort != "" {

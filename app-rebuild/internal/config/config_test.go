@@ -14,8 +14,17 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.HTTP.Port != defaultHTTPPort {
 		t.Fatalf("HTTP.Port = %d, want %d", config.HTTP.Port, defaultHTTPPort)
 	}
+	if config.HTTP.Host != defaultHTTPHost {
+		t.Fatalf("HTTP.Host = %q, want %q", config.HTTP.Host, defaultHTTPHost)
+	}
 	if config.GRPC.Port != defaultGRPCPort {
 		t.Fatalf("GRPC.Port = %d, want %d", config.GRPC.Port, defaultGRPCPort)
+	}
+	if config.GRPC.Host != defaultGRPCHost {
+		t.Fatalf("GRPC.Host = %q, want %q", config.GRPC.Host, defaultGRPCHost)
+	}
+	if config.HTTP.Address() != "0.0.0.0:38081" || config.GRPC.Address() != "127.0.0.1:39090" {
+		t.Fatalf("addresses = %q and %q", config.HTTP.Address(), config.GRPC.Address())
 	}
 	if config.Database.URL != defaultDatabaseURL {
 		t.Fatalf("Database.URL = %q, want %q", config.Database.URL, defaultDatabaseURL)
@@ -25,7 +34,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 func TestLoadReadsEnvironment(t *testing.T) {
 	values := map[string]string{
 		"APP_NAME":       "local-api",
+		"HTTP_HOST":      "192.0.2.10",
 		"HTTP_PORT":      "48080",
+		"GRPC_HOST":      "10.0.0.10",
 		"GRPC_PORT":      "49090",
 		"DATABASE_URL":   "postgres://local/test",
 		"REDIS_ADDR":     "localhost:6379",
@@ -46,7 +57,7 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if config.ServiceName != "local-api" || config.HTTP.Port != 48080 || config.GRPC.Port != 49090 || config.Database.URL != "postgres://local/test" {
+	if config.ServiceName != "local-api" || config.HTTP.Address() != "192.0.2.10:48080" || config.GRPC.Address() != "10.0.0.10:49090" || config.Database.URL != "postgres://local/test" {
 		t.Fatalf("config = %+v, want local-api on 48080", config)
 	}
 	if config.Redis.Addr != "localhost:6379" || config.Redis.Password != "secret" || config.Redis.DB != 2 {

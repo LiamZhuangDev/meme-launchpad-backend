@@ -23,6 +23,9 @@ The original backend is not imported or modified by this project.
 - [x] Step 10.3 — gRPC wallet authentication
 - [x] Step 10.4 — gRPC token creation and upload authorization
 - [x] Step 10.5 — transport parity tests and permanent dual transports
+- [x] Step 11.1 — public REST and loopback-only internal gRPC listeners
+- [ ] Step 11.2 — internal Go service client
+- [ ] Step 11.3 — private-network TLS and service identity
 
 ## Step 1: run the foundation
 
@@ -58,6 +61,7 @@ configuration, creates the application, starts HTTP, and handles shutdown.
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
 | `APP_NAME` | `meme-launchpad-rebuild-api` | Name returned by `/healthz` and used in logs |
+| `HTTP_HOST` | `0.0.0.0` | REST listener host; all interfaces by default |
 | `HTTP_PORT` | `38081` | HTTP port; must be from 1 through 65535 |
 
 `internal/app` is the dependency container. It currently wires the configured
@@ -688,3 +692,58 @@ At this checkpoint every REST capability in `app-rebuild` has a parallel gRPC
 surface. `upload-confirm` is still only an authenticated acknowledgment in
 both transports; object verification and metadata persistence are a future
 application feature, not unfinished gRPC transport work.
+
+## Step 11.1: explicit public and internal listener boundaries
+
+The two transports now have separate host configuration as well as separate
+ports:
+
+| Transport | Default address | Intended caller |
+| --- | --- | --- |
+| REST | `0.0.0.0:38081` | Frontend, browser, and public HTTP clients |
+| gRPC | `127.0.0.1:39090` | Internal Go processes on the same machine |
+
+`0.0.0.0` means the REST process listens on every network interface; firewall,
+load-balancer, and deployment rules still decide whether it is internet
+reachable. `127.0.0.1` means gRPC accepts only connections originating from
+the same machine, so it is not accidentally exposed on a developer laptop.
+
+The listener settings are:
+
+| Environment variable | Default |
+| --- | --- |
+| `HTTP_HOST` | `0.0.0.0` |
+| `HTTP_PORT` | `38081` |
+| `GRPC_HOST` | `127.0.0.1` |
+| `GRPC_PORT` | `39090` |
+
+Start both listeners in the same API process:
+
+```bash
+go run ./cmd/api
+```
+
+The frontend-facing REST check remains:
+
+```bash
+curl http://localhost:38081/healthz
+```
+
+A local internal client can check gRPC:
+
+```bash
+grpcurl -plaintext -d '{"service":"meme-launchpad-rebuild-api"}' \
+  localhost:39090 grpc.health.v1.Health/Check
+```
+
+For containers or Kubernetes, internal services need a routable listener. Set
+`GRPC_HOST=0.0.0.0`, attach the API and callers to a private network, and expose
+only `38081` through public ingress. Do not publish `39090` publicly:
+
+```text
+Internet --> ingress --> REST 0.0.0.0:38081
+Internal private network --> gRPC 0.0.0.0:39090
+```
+
+Step 11.2 will add an actual internal Go client command that consumes the
+generated gRPC API instead of using `grpcurl`.

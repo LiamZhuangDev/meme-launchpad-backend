@@ -32,7 +32,7 @@ func main() {
 	defer application.Close()
 	server := application.HTTPServer()
 	grpcServer := application.GRPCServer()
-	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPC.Port))
+	grpcListener, err := net.Listen("tcp", cfg.GRPC.Address())
 	if err != nil {
 		log.Fatalf("listen for gRPC: %v", err)
 	}
@@ -40,13 +40,13 @@ func main() {
 	serverErrors := make(chan error, 2)
 
 	go func() {
-		log.Printf("%s listening on http://localhost:%d", cfg.ServiceName, cfg.HTTP.Port)
+		log.Printf("%s REST listening on http://%s", cfg.ServiceName, cfg.HTTP.Address())
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- fmt.Errorf("HTTP server: %w", err)
 		}
 	}()
 	go func() {
-		log.Printf("%s listening with gRPC on localhost:%d", cfg.ServiceName, cfg.GRPC.Port)
+		log.Printf("%s internal gRPC listening on %s", cfg.ServiceName, cfg.GRPC.Address())
 		if err := grpcServer.Serve(grpcListener); err != nil {
 			serverErrors <- fmt.Errorf("gRPC server: %w", err)
 		}
