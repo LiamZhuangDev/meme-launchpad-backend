@@ -20,8 +20,8 @@ type Dependencies struct {
 
 // NewServer creates the gRPC transport. Business services are registered here
 // one vertical slice at a time while the REST API remains available.
-func NewServer(serviceName string, dependencies Dependencies) *grpc.Server {
-	server := grpc.NewServer()
+func NewServer(serviceName string, dependencies Dependencies, options ...grpc.ServerOption) *grpc.Server {
+	server := grpc.NewServer(options...)
 	healthService := health.NewServer()
 	healthService.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	healthService.SetServingStatus(serviceName, healthpb.HealthCheckResponse_SERVING)

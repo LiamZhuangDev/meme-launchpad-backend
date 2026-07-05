@@ -14,6 +14,7 @@ import (
 
 	"github.com/meme-launchpad/app-rebuild/internal/app"
 	"github.com/meme-launchpad/app-rebuild/internal/config"
+	"github.com/meme-launchpad/app-rebuild/internal/grpcsecurity"
 )
 
 func main() {
@@ -31,13 +32,21 @@ func main() {
 	}
 	defer application.Close()
 	server := application.HTTPServer()
-	grpcServer := application.GRPCServer()
+	grpcOptions, err := grpcsecurity.ServerOptions(cfg.GRPC.TLS)
+	if err != nil {
+		log.Fatalf("configure internal gRPC security: %v", err)
+	}
+	grpcServer := application.GRPCServer(grpcOptions...)
 	grpcListener, err := net.Listen("tcp", cfg.GRPC.Address())
 	if err != nil {
 		log.Fatalf("listen for gRPC: %v", err)
 	}
 
 	serverErrors := make(chan error, 2)
+	grpcSecurityMode := "loopback plaintext"
+	if cfg.GRPC.TLS.Enabled() {
+		grpcSecurityMode = "mutual TLS"
+	}
 
 	go func() {
 		log.Printf("%s REST listening on http://%s", cfg.ServiceName, cfg.HTTP.Address())
@@ -46,7 +55,7 @@ func main() {
 		}
 	}()
 	go func() {
-		log.Printf("%s internal gRPC listening on %s", cfg.ServiceName, cfg.GRPC.Address())
+		log.Printf("%s internal gRPC (%s) listening on %s", cfg.ServiceName, grpcSecurityMode, cfg.GRPC.Address())
 		if err := grpcServer.Serve(grpcListener); err != nil {
 			serverErrors <- fmt.Errorf("gRPC server: %w", err)
 		}

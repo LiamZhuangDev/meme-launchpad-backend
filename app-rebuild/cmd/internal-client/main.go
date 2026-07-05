@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/meme-launchpad/app-rebuild/internal/grpcclient"
+	"github.com/meme-launchpad/app-rebuild/internal/grpcsecurity"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -20,13 +20,26 @@ func main() {
 	timeout := durationOrDefault("INTERNAL_GRPC_TIMEOUT", 5*time.Second)
 	page := int32OrDefault("TOKEN_PAGE", 1)
 	pageSize := int32OrDefault("TOKEN_PAGE_SIZE", 20)
+	clientTLS := grpcsecurity.ClientTLSConfig{
+		CAFile:     os.Getenv("INTERNAL_GRPC_CA_FILE"),
+		CertFile:   os.Getenv("INTERNAL_GRPC_CERT_FILE"),
+		KeyFile:    os.Getenv("INTERNAL_GRPC_KEY_FILE"),
+		ServerName: os.Getenv("INTERNAL_GRPC_SERVER_NAME"),
+	}
+	if !clientTLS.Enabled() && !grpcsecurity.IsLoopbackTarget(target) {
+		log.Fatal("mutual TLS is required when INTERNAL_GRPC_TARGET is not loopback")
+	}
+	transportCredentials, err := grpcsecurity.ClientCredentials(clientTLS)
+	if err != nil {
+		log.Fatalf("configure internal gRPC security: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	connection, err := grpc.DialContext(
 		ctx,
 		target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(transportCredentials),
 		grpc.WithBlock(),
 	)
 	if err != nil {

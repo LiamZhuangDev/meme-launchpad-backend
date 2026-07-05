@@ -25,7 +25,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 10.5 — transport parity tests and permanent dual transports
 - [x] Step 11.1 — public REST and loopback-only internal gRPC listeners
 - [x] Step 11.2 — internal Go service client
-- [ ] Step 11.3 — private-network TLS and service identity
+- [x] Step 11.3 — private-network mutual TLS and service identity
 
 ## Step 1: run the foundation
 
@@ -736,9 +736,10 @@ grpcurl -plaintext -d '{"service":"meme-launchpad-rebuild-api"}' \
   localhost:39090 grpc.health.v1.Health/Check
 ```
 
-For containers or Kubernetes, internal services need a routable listener. Set
-`GRPC_HOST=0.0.0.0`, attach the API and callers to a private network, and expose
-only `38081` through public ingress. Do not publish `39090` publicly:
+For containers or Kubernetes, internal services need a routable listener. Step
+11.3 combines `GRPC_HOST=0.0.0.0` with mandatory mTLS. Attach the API and
+callers to a private network, expose only `38081` through public ingress, and
+do not publish `39090` publicly:
 
 ```text
 Internet --> ingress --> REST 0.0.0.0:38081
@@ -790,13 +791,86 @@ For example:
 TOKEN_PAGE=2 TOKEN_PAGE_SIZE=5 go run ./cmd/internal-client
 ```
 
-For container-to-container traffic, use the API's private DNS name while the
-server uses `GRPC_HOST=0.0.0.0`:
+For container-to-container traffic, use the API's private DNS name together
+with the Step 11.3 client certificate settings:
 
 ```bash
-INTERNAL_GRPC_TARGET=meme-api:39090 go run ./cmd/internal-client
+INTERNAL_GRPC_TARGET=meme-api:39090 \
+INTERNAL_GRPC_CA_FILE=/certs/ca.crt \
+INTERNAL_GRPC_CERT_FILE=/certs/internal-client.crt \
+INTERNAL_GRPC_KEY_FILE=/certs/internal-client.key \
+INTERNAL_GRPC_SERVER_NAME=meme-api \
+go run ./cmd/internal-client
 ```
 
-This checkpoint intentionally uses plaintext transport credentials because
-the default listener is loopback-only. Step 11.3 will replace that assumption
-with TLS and explicit internal service identity for private-network traffic.
+This checkpoint uses plaintext transport credentials only when the server is
+left in its default loopback-only development mode. The next section adds
+mutual TLS for private-network deployments.
+
+## Step 11.3: mutual TLS and internal service identity
+
+When TLS configuration is present, the gRPC server requires mutual TLS:
+
+```text
+Internal client certificate
+  -> signed by configured internal CA
+  -> TLS encryption and certificate verification
+  -> URI SAN or Common Name checked against service allowlist
+  -> gRPC handler
+```
+
+The server settings must be supplied together:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `GRPC_TLS_CERT_FILE` | API server certificate |
+| `GRPC_TLS_KEY_FILE` | API server private key |
+| `GRPC_TLS_CLIENT_CA_FILE` | CA trusted to issue internal client certificates |
+| `GRPC_ALLOWED_CLIENT_IDS` | Comma-separated URI SANs or Common Names allowed to call gRPC |
+
+The internal client settings must also be supplied together:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `INTERNAL_GRPC_CA_FILE` | CA trusted to issue the API server certificate |
+| `INTERNAL_GRPC_CERT_FILE` | Internal service client certificate |
+| `INTERNAL_GRPC_KEY_FILE` | Internal service private key |
+| `INTERNAL_GRPC_SERVER_NAME` | DNS identity expected in the server certificate |
+
+Generate disposable local development certificates. The generated directory
+is ignored by Git:
+
+```bash
+scripts/generate-dev-mtls.sh
+```
+
+Start the API with mTLS and one allowed service identity:
+
+```bash
+GRPC_TLS_CERT_FILE=.local-certs/server.crt \
+GRPC_TLS_KEY_FILE=.local-certs/server.key \
+GRPC_TLS_CLIENT_CA_FILE=.local-certs/ca.crt \
+GRPC_ALLOWED_CLIENT_IDS='spiffe://meme-launchpad/internal-client' \
+go run ./cmd/api
+```
+
+Run the authenticated internal client:
+
+```bash
+INTERNAL_GRPC_CA_FILE=.local-certs/ca.crt \
+INTERNAL_GRPC_CERT_FILE=.local-certs/internal-client.crt \
+INTERNAL_GRPC_KEY_FILE=.local-certs/internal-client.key \
+INTERNAL_GRPC_SERVER_NAME=localhost \
+go run ./cmd/internal-client
+```
+
+A certificate signed by the CA but carrying an identity absent from
+`GRPC_ALLOWED_CLIENT_IDS` receives `PermissionDenied`. A missing or unverified
+client certificate is rejected during TLS or with `Unauthenticated`. Unary and
+streaming RPCs use the same identity policy.
+
+Production should issue short-lived certificates through its secret manager
+or workload-identity system rather than use the development CA. With no TLS
+variables configured, the `127.0.0.1:39090` development listener remains
+plaintext for the local learning workflow. The configuration rejects a
+non-loopback `GRPC_HOST` or `INTERNAL_GRPC_TARGET` when mTLS is absent.

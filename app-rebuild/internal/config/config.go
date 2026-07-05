@@ -43,7 +43,17 @@ type HTTPConfig struct {
 type GRPCConfig struct {
 	Host string
 	Port int
+	TLS  GRPCTLSConfig
 }
+
+type GRPCTLSConfig struct {
+	CertFile         string
+	KeyFile          string
+	ClientCAFile     string
+	AllowedClientIDs []string
+}
+
+func (c GRPCTLSConfig) Enabled() bool { return c.CertFile != "" }
 
 func (c HTTPConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 func (c GRPCConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
@@ -148,6 +158,28 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("GRPC_PORT must be an integer from 1 to 65535")
 		}
 		config.GRPC.Port = port
+	}
+	if value, ok := lookup("GRPC_TLS_CERT_FILE"); ok && value != "" {
+		config.GRPC.TLS.CertFile = value
+	}
+	if value, ok := lookup("GRPC_TLS_KEY_FILE"); ok && value != "" {
+		config.GRPC.TLS.KeyFile = value
+	}
+	if value, ok := lookup("GRPC_TLS_CLIENT_CA_FILE"); ok && value != "" {
+		config.GRPC.TLS.ClientCAFile = value
+	}
+	if value, ok := lookup("GRPC_ALLOWED_CLIENT_IDS"); ok && value != "" {
+		for _, identity := range strings.Split(value, ",") {
+			if identity = strings.TrimSpace(identity); identity != "" {
+				config.GRPC.TLS.AllowedClientIDs = append(config.GRPC.TLS.AllowedClientIDs, identity)
+			}
+		}
+	}
+	if err := config.GRPC.TLS.Validate(); err != nil {
+		return Config{}, err
+	}
+	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.GRPC.Host) {
+		return Config{}, fmt.Errorf("gRPC TLS is required when GRPC_HOST is not loopback")
 	}
 
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
@@ -257,6 +289,30 @@ func (c IndexerConfig) Validate() error {
 		return fmt.Errorf("indexer batch size and poll interval must be positive")
 	}
 	return nil
+}
+
+func (c GRPCTLSConfig) Validate() error {
+	configured := 0
+	for _, value := range []bool{c.CertFile != "", c.KeyFile != "", c.ClientCAFile != "", len(c.AllowedClientIDs) > 0} {
+		if value {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return nil
+	}
+	if configured != 4 {
+		return fmt.Errorf("GRPC_TLS_CERT_FILE, GRPC_TLS_KEY_FILE, GRPC_TLS_CLIENT_CA_FILE, and GRPC_ALLOWED_CLIENT_IDS must be set together")
+	}
+	return nil
+}
+
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (c Config) validateTokenCreation() error {

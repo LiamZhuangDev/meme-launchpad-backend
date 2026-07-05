@@ -33,20 +33,24 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestLoadReadsEnvironment(t *testing.T) {
 	values := map[string]string{
-		"APP_NAME":       "local-api",
-		"HTTP_HOST":      "192.0.2.10",
-		"HTTP_PORT":      "48080",
-		"GRPC_HOST":      "10.0.0.10",
-		"GRPC_PORT":      "49090",
-		"DATABASE_URL":   "postgres://local/test",
-		"REDIS_ADDR":     "localhost:6379",
-		"REDIS_PASSWORD": "secret",
-		"REDIS_DB":       "2",
-		"COS_SECRET_ID":  "cos-id",
-		"COS_SECRET_KEY": "cos-key",
-		"COS_BUCKET":     "bucket",
-		"COS_REGION":     "ap-guangzhou",
-		"COS_DOMAIN":     "https://cdn.example",
+		"APP_NAME":                "local-api",
+		"HTTP_HOST":               "192.0.2.10",
+		"HTTP_PORT":               "48080",
+		"GRPC_HOST":               "10.0.0.10",
+		"GRPC_PORT":               "49090",
+		"GRPC_TLS_CERT_FILE":      "/certs/server.crt",
+		"GRPC_TLS_KEY_FILE":       "/certs/server.key",
+		"GRPC_TLS_CLIENT_CA_FILE": "/certs/ca.crt",
+		"GRPC_ALLOWED_CLIENT_IDS": "spiffe://meme/client,worker",
+		"DATABASE_URL":            "postgres://local/test",
+		"REDIS_ADDR":              "localhost:6379",
+		"REDIS_PASSWORD":          "secret",
+		"REDIS_DB":                "2",
+		"COS_SECRET_ID":           "cos-id",
+		"COS_SECRET_KEY":          "cos-key",
+		"COS_BUCKET":              "bucket",
+		"COS_REGION":              "ap-guangzhou",
+		"COS_DOMAIN":              "https://cdn.example",
 	}
 
 	config, err := Load(func(key string) (string, bool) {
@@ -65,6 +69,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if config.COS.SecretID != "cos-id" || config.COS.Domain != "https://cdn.example" {
 		t.Fatalf("cos config = %+v", config.COS)
+	}
+	if !config.GRPC.TLS.Enabled() || len(config.GRPC.TLS.AllowedClientIDs) != 2 {
+		t.Fatalf("gRPC TLS config = %+v", config.GRPC.TLS)
 	}
 }
 
@@ -89,6 +96,30 @@ func TestLoadRejectsInvalidGRPCPort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want invalid gRPC port error")
+	}
+}
+
+func TestLoadRejectsPartialGRPCTLSConfig(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "GRPC_TLS_CERT_FILE" {
+			return "/certs/server.crt", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want partial gRPC TLS config error")
+	}
+}
+
+func TestLoadRejectsNonLoopbackPlaintextGRPC(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "GRPC_HOST" {
+			return "0.0.0.0", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want TLS requirement for routable gRPC")
 	}
 }
 
