@@ -26,6 +26,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.HTTP.Address() != "0.0.0.0:38081" || config.GRPC.Address() != "127.0.0.1:39090" {
 		t.Fatalf("addresses = %q and %q", config.HTTP.Address(), config.GRPC.Address())
 	}
+	if config.TokenService.Address() != "127.0.0.1:39100" {
+		t.Fatalf("TokenService.Address() = %q", config.TokenService.Address())
+	}
 	if config.Database.URL != defaultDatabaseURL {
 		t.Fatalf("Database.URL = %q, want %q", config.Database.URL, defaultDatabaseURL)
 	}
@@ -38,6 +41,8 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		"HTTP_PORT":               "48080",
 		"GRPC_HOST":               "10.0.0.10",
 		"GRPC_PORT":               "49090",
+		"TOKEN_SERVICE_GRPC_HOST": "10.0.0.11",
+		"TOKEN_SERVICE_GRPC_PORT": "49100",
 		"GRPC_TLS_CERT_FILE":      "/certs/server.crt",
 		"GRPC_TLS_KEY_FILE":       "/certs/server.key",
 		"GRPC_TLS_CLIENT_CA_FILE": "/certs/ca.crt",
@@ -63,6 +68,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 
 	if config.ServiceName != "local-api" || config.HTTP.Address() != "192.0.2.10:48080" || config.GRPC.Address() != "10.0.0.10:49090" || config.Database.URL != "postgres://local/test" {
 		t.Fatalf("config = %+v, want local-api on 48080", config)
+	}
+	if config.TokenService.Address() != "10.0.0.11:49100" {
+		t.Fatalf("token service config = %+v", config.TokenService)
 	}
 	if config.Redis.Addr != "localhost:6379" || config.Redis.Password != "secret" || config.Redis.DB != 2 {
 		t.Fatalf("redis config = %+v", config.Redis)
@@ -96,6 +104,18 @@ func TestLoadRejectsInvalidGRPCPort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want invalid gRPC port error")
+	}
+}
+
+func TestLoadRejectsInvalidTokenServiceGRPCPort(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "TOKEN_SERVICE_GRPC_PORT" {
+			return "70000", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid token-service gRPC port error")
 	}
 }
 

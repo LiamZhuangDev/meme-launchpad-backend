@@ -26,6 +26,9 @@ The original backend is not imported or modified by this project.
 - [x] Step 11.1 — public REST and loopback-only internal gRPC listeners
 - [x] Step 11.2 — internal Go service client
 - [x] Step 11.3 — private-network mutual TLS and service identity
+- [x] Step 12.1 — standalone internal token-read gRPC service
+- [ ] Step 12.2 — REST-to-gRPC token reader adapter
+- [ ] Step 12.3 — switch REST token reads and remove duplicate ownership
 
 ## Step 1: run the foundation
 
@@ -874,3 +877,60 @@ or workload-identity system rather than use the development CA. With no TLS
 variables configured, the `127.0.0.1:39090` development listener remains
 plaintext for the local learning workflow. The configuration rejects a
 non-loopback `GRPC_HOST` or `INTERNAL_GRPC_TARGET` when mTLS is absent.
+
+## Step 12.1: standalone token-read gRPC service
+
+Token reads now have an independently runnable service process:
+
+```text
+cmd/token-service :39100
+  -> TokenService gRPC handler
+  -> TokenRepository
+  -> PostgreSQL tokens projection
+```
+
+This is the first extraction checkpoint. The public API still reads tokens
+directly and continues serving its existing parallel gRPC surface. Keeping
+that behavior unchanged makes the extraction reversible while the new process
+is verified.
+
+The standalone listener settings are:
+
+| Environment variable | Default |
+| --- | --- |
+| `TOKEN_SERVICE_GRPC_HOST` | `127.0.0.1` |
+| `TOKEN_SERVICE_GRPC_PORT` | `39100` |
+
+Start PostgreSQL, then run the service:
+
+```bash
+go run ./cmd/token-service
+```
+
+Expected log:
+
+```text
+meme-token-service internal gRPC (loopback plaintext) listening on 127.0.0.1:39100
+```
+
+Use the internal Go client against the extracted process:
+
+```bash
+INTERNAL_GRPC_TARGET=127.0.0.1:39100 go run ./cmd/internal-client
+```
+
+Or call it with `grpcurl`:
+
+```bash
+grpcurl -plaintext -d '{"page":1,"pageSize":20}' \
+  127.0.0.1:39100 meme.token.v1.TokenService/ListTokens
+```
+
+The process initializes only its PostgreSQL pool and `TokenRepository`; it does
+not construct REST, Redis, SIWE, uploads, or token-creation signing. Existing
+`GRPC_TLS_*` settings can also secure this listener with the Step 11.3 mTLS
+policy.
+
+Step 12.2 will add an outbound adapter that implements the REST layer's
+`TokenReader` interface using the generated gRPC client. REST will still keep
+its direct repository fallback until the following cutover checkpoint.

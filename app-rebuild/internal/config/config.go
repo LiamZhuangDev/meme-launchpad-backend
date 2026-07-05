@@ -13,12 +13,14 @@ import (
 )
 
 const (
-	defaultServiceName = "meme-launchpad-rebuild-api"
-	defaultHTTPHost    = "0.0.0.0"
-	defaultHTTPPort    = 38081
-	defaultGRPCHost    = "127.0.0.1"
-	defaultGRPCPort    = 39090
-	defaultDatabaseURL = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
+	defaultServiceName      = "meme-launchpad-rebuild-api"
+	defaultHTTPHost         = "0.0.0.0"
+	defaultHTTPPort         = 38081
+	defaultGRPCHost         = "127.0.0.1"
+	defaultGRPCPort         = 39090
+	defaultTokenServiceHost = "127.0.0.1"
+	defaultTokenServicePort = 39100
+	defaultDatabaseURL      = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
 )
 
 // Config contains the process configuration shared by the API and indexer
@@ -27,6 +29,7 @@ type Config struct {
 	ServiceName   string
 	HTTP          HTTPConfig
 	GRPC          GRPCConfig
+	TokenService  TokenServiceConfig
 	Database      DatabaseConfig
 	Redis         RedisConfig
 	Auth          AuthConfig
@@ -53,10 +56,18 @@ type GRPCTLSConfig struct {
 	AllowedClientIDs []string
 }
 
+type TokenServiceConfig struct {
+	Host string
+	Port int
+}
+
 func (c GRPCTLSConfig) Enabled() bool { return c.CertFile != "" }
 
 func (c HTTPConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 func (c GRPCConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
+func (c TokenServiceConfig) Address() string {
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
 
 type DatabaseConfig struct {
 	URL string
@@ -113,6 +124,7 @@ type LookupEnv func(string) (string, bool)
 // APP_NAME defaults to meme-launchpad-rebuild-api.
 // HTTP_HOST defaults to 0.0.0.0 and HTTP_PORT defaults to 38081.
 // GRPC_HOST defaults to 127.0.0.1 and GRPC_PORT defaults to 39090.
+// TOKEN_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_SERVICE_GRPC_PORT defaults to 39100.
 // DATABASE_URL defaults to a local development PostgreSQL database.
 func Load(lookup LookupEnv) (Config, error) {
 	config := Config{
@@ -124,6 +136,10 @@ func Load(lookup LookupEnv) (Config, error) {
 		GRPC: GRPCConfig{
 			Host: defaultGRPCHost,
 			Port: defaultGRPCPort,
+		},
+		TokenService: TokenServiceConfig{
+			Host: defaultTokenServiceHost,
+			Port: defaultTokenServicePort,
 		},
 		Database: DatabaseConfig{
 			URL: defaultDatabaseURL,
@@ -144,6 +160,9 @@ func Load(lookup LookupEnv) (Config, error) {
 	if host, ok := lookup("GRPC_HOST"); ok && host != "" {
 		config.GRPC.Host = host
 	}
+	if host, ok := lookup("TOKEN_SERVICE_GRPC_HOST"); ok && host != "" {
+		config.TokenService.Host = host
+	}
 
 	if rawPort, ok := lookup("HTTP_PORT"); ok && rawPort != "" {
 		port, err := strconv.Atoi(rawPort)
@@ -158,6 +177,13 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("GRPC_PORT must be an integer from 1 to 65535")
 		}
 		config.GRPC.Port = port
+	}
+	if rawPort, ok := lookup("TOKEN_SERVICE_GRPC_PORT"); ok && rawPort != "" {
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return Config{}, fmt.Errorf("TOKEN_SERVICE_GRPC_PORT must be an integer from 1 to 65535")
+		}
+		config.TokenService.Port = port
 	}
 	if value, ok := lookup("GRPC_TLS_CERT_FILE"); ok && value != "" {
 		config.GRPC.TLS.CertFile = value
@@ -180,6 +206,9 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.GRPC.Host) {
 		return Config{}, fmt.Errorf("gRPC TLS is required when GRPC_HOST is not loopback")
+	}
+	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.TokenService.Host) {
+		return Config{}, fmt.Errorf("gRPC TLS is required when TOKEN_SERVICE_GRPC_HOST is not loopback")
 	}
 
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
