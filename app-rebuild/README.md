@@ -27,7 +27,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 11.2 — internal Go service client
 - [x] Step 11.3 — private-network mutual TLS and service identity
 - [x] Step 12.1 — standalone internal token-read gRPC service
-- [ ] Step 12.2 — REST-to-gRPC token reader adapter
+- [x] Step 12.2 — REST-to-gRPC token reader adapter
 - [ ] Step 12.3 — switch REST token reads and remove duplicate ownership
 
 ## Step 1: run the foundation
@@ -931,6 +931,30 @@ not construct REST, Redis, SIWE, uploads, or token-creation signing. Existing
 `GRPC_TLS_*` settings can also secure this listener with the Step 11.3 mTLS
 policy.
 
-Step 12.2 will add an outbound adapter that implements the REST layer's
-`TokenReader` interface using the generated gRPC client. REST will still keep
-its direct repository fallback until the following cutover checkpoint.
+Step 12.2 adds an outbound adapter that implements the REST layer's
+`TokenReader` interface using the generated gRPC client. REST still keeps its
+direct repository fallback until the following cutover checkpoint.
+
+## Step 12.2: REST-to-gRPC token reader adapter
+
+`internal/grpcclient.TokenReader` now adapts the generated gRPC client to the
+same interface already consumed by the REST token handlers:
+
+```text
+REST TokenReader interface
+  -> grpcclient.TokenReader
+  -> generated TokenServiceClient
+  -> standalone token service :39100
+```
+
+The adapter translates REST's `limit/offset` pagination into Protobuf's
+`page/page_size`, calls both `ListTokens` and `GetToken`, and maps Protobuf
+tokens back into the repository-shaped values expected by the unchanged JSON
+handlers. It requires an offset aligned to the page size, which is exactly how
+the REST pagination handler calls `TokenReader.List`.
+
+This checkpoint deliberately does not construct a connection in `cmd/api` or
+change `Application.HTTPServer()`. REST therefore still reads PostgreSQL
+directly while the adapter is tested independently. Step 12.3 will wire this
+adapter into REST and move token-read ownership fully behind the standalone
+gRPC service.
