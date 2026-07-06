@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func TestPresignBuildsCOSUploadAndPublicURLs(t *testing.T) {
 	}
 	service.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
 
-	result, err := service.Presign("token-logo", "image/webp", 97)
+	result, err := service.Presign(context.Background(), "token-logo", "image/webp", 97)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 13.2 — REST-to-gRPC token-creation adapter
 - [x] Step 13.3 — switch REST token creation and remove duplicate ownership
 - [x] Step 14.1 — standalone internal upload gRPC service
-- [ ] Step 14.2 — REST-to-gRPC upload adapter
+- [x] Step 14.2 — REST-to-gRPC upload adapter
 - [ ] Step 14.3 — switch REST uploads and remove duplicate ownership
 
 ## Step 1: run the foundation
@@ -1297,3 +1297,37 @@ go run ./cmd/upload-service
 
 Step 14.2 will add a REST-facing gRPC client adapter while keeping the local
 upload implementation wired as the rollback path.
+
+## Step 14.2: REST-to-gRPC upload adapter
+
+The REST upload boundary is now context-aware and includes both operations:
+
+```text
+Presign(ctx, folder, mimeType, chainID)
+Confirm(ctx)
+```
+
+Both the local `upload.Service` and `grpcclient.UploadService` implement this
+interface. The local confirmation remains the existing authenticated
+acknowledgment; object verification and metadata persistence are still a future
+checkpoint.
+
+The adapter translates the REST folder into the Protobuf image kind, forwards
+the validated browser JWT as outgoing gRPC authorization metadata, and maps
+the Protobuf expiry timestamp back into the existing REST response:
+
+```text
+REST Presigner interface
+  -> grpcclient.UploadService
+  -> generated UploadServiceClient
+  -> standalone upload service :39300
+```
+
+The same metadata forwarding applies to `ConfirmUpload`. The standalone
+service validates the JWT again, so neither operation trusts an unauthenticated
+internal caller.
+
+This checkpoint does not connect `cmd/api` to `:39300`; REST still uses its
+local COS signer. Step 14.3 will manage the upload-service connection, verify
+the `meme-upload-service` health identity, cut REST over, and remove upload
+from the API's own `:39090` gRPC listener.

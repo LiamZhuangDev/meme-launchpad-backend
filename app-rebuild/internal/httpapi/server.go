@@ -28,7 +28,8 @@ type TokenCreator interface {
 }
 
 type Presigner interface {
-	Presign(folder, mimeType string, chainID int) (upload.PresignResult, error)
+	Presign(context.Context, string, string, int) (upload.PresignResult, error)
+	Confirm(context.Context) error
 }
 
 func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader, creation TokenCreator, uploads Presigner) http.Handler {
@@ -49,7 +50,7 @@ func NewHandler(serviceName string, authService *auth.Service, tokens TokenReade
 			mux.HandleFunc("/api/v1/file/token-logo-presign", presignImage(authService, uploads, "token-logo"))
 			mux.HandleFunc("/api/v1/file/token-banner-presign", presignImage(authService, uploads, "token-banner"))
 			mux.HandleFunc("/api/v1/file/activity-image-presign", presignImage(authService, uploads, "activity-image"))
-			mux.HandleFunc("/api/v1/file/upload-confirm", uploadConfirm(authService))
+			mux.HandleFunc("/api/v1/file/upload-confirm", uploadConfirm(authService, uploads))
 		}
 	}
 	return mux
@@ -64,6 +65,7 @@ func presignImage(authService *auth.Service, uploads Presigner, folder string) h
 		if _, ok := bearerClaims(w, r, authService); !ok {
 			return
 		}
+		ctx := auth.WithBearerToken(r.Context(), r.Header.Get("Authorization")[len("Bearer "):])
 		mimeType := r.URL.Query().Get("mimeType")
 		if mimeType == "" {
 			mimeType = "image/png"
@@ -77,7 +79,7 @@ func presignImage(authService *auth.Service, uploads Presigner, folder string) h
 			}
 			chainID = parsed
 		}
-		result, err := uploads.Presign(folder, mimeType, chainID)
+		result, err := uploads.Presign(ctx, folder, mimeType, chainID)
 		if err != nil {
 			writeError(w, err.Error(), http.StatusBadRequest)
 			return
@@ -86,13 +88,18 @@ func presignImage(authService *auth.Service, uploads Presigner, folder string) h
 	}
 }
 
-func uploadConfirm(authService *auth.Service) http.HandlerFunc {
+func uploadConfirm(authService *auth.Service, uploads Presigner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		if _, ok := bearerClaims(w, r, authService); !ok {
+			return
+		}
+		ctx := auth.WithBearerToken(r.Context(), r.Header.Get("Authorization")[len("Bearer "):])
+		if err := uploads.Confirm(ctx); err != nil {
+			writeError(w, "failed to confirm upload", http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, map[string]bool{"ok": true}, http.StatusOK)

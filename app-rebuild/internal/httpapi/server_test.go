@@ -28,9 +28,11 @@ type fakeCreationStore struct {
 }
 
 type fakePresigner struct {
-	folder   string
-	mimeType string
-	chainID  int
+	folder    string
+	mimeType  string
+	chainID   int
+	token     string
+	confirmed bool
 }
 
 type fakeTokenCreator struct {
@@ -58,9 +60,16 @@ func (f *fakeTokenReader) FindByAddress(context.Context, string) (repository.Tok
 	return repository.Token{}, nil
 }
 
-func (f *fakePresigner) Presign(folder, mimeType string, chainID int) (upload.PresignResult, error) {
+func (f *fakePresigner) Presign(ctx context.Context, folder, mimeType string, chainID int) (upload.PresignResult, error) {
 	f.folder, f.mimeType, f.chainID = folder, mimeType, chainID
+	f.token, _ = auth.BearerTokenFromContext(ctx)
 	return upload.PresignResult{UploadURL: "https://upload.example", PublicURL: "https://cdn.example/image.png", Key: folder + "/image.png"}, nil
+}
+
+func (f *fakePresigner) Confirm(ctx context.Context) error {
+	f.token, _ = auth.BearerTokenFromContext(ctx)
+	f.confirmed = true
+	return nil
 }
 
 func TestHealth(t *testing.T) {
@@ -175,8 +184,29 @@ func TestPresignImageRequiresAuthAndUsesFolder(t *testing.T) {
 	if presigner.folder != "token-logo" || presigner.mimeType != "image/webp" || presigner.chainID != 56 {
 		t.Fatalf("presign args = %s %s %d", presigner.folder, presigner.mimeType, presigner.chainID)
 	}
+	if presigner.token != token {
+		t.Fatal("validated bearer token was not forwarded to upload service")
+	}
 	if !strings.Contains(recorder.Body.String(), `"uploadUrl":"https://upload.example"`) {
 		t.Fatalf("body = %s", recorder.Body)
+	}
+}
+
+func TestUploadConfirmCarriesBearerTokenToService(t *testing.T) {
+	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
+	uploads := &fakePresigner{}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: "0x3333333333333333333333333333333333333333"}).SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/file/upload-confirm", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+
+	NewHandler("test", authService, nil, nil, uploads).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || !uploads.confirmed || uploads.token != token {
+		t.Fatalf("status = %d, confirmed = %t, token forwarded = %t", recorder.Code, uploads.confirmed, uploads.token == token)
 	}
 }
 

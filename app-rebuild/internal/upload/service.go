@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
@@ -37,7 +38,7 @@ func New(cfg config.COSConfig) (*Service, error) {
 	return &Service{secretID: cfg.SecretID, secretKey: cfg.SecretKey, bucket: cfg.Bucket, region: cfg.Region, domain: cfg.Domain, now: time.Now}, nil
 }
 
-func (s *Service) Presign(folder, mimeType string, chainID int) (PresignResult, error) {
+func (s *Service) Presign(_ context.Context, folder, mimeType string, chainID int) (PresignResult, error) {
 	if folder == "" {
 		return PresignResult{}, fmt.Errorf("folder is required")
 	}
@@ -59,6 +60,10 @@ func (s *Service) Presign(folder, mimeType string, chainID int) (PresignResult, 
 		Expires:   expiresAt.Unix(),
 	}, nil
 }
+
+// Confirm remains an authenticated acknowledgment until object verification
+// and metadata persistence are implemented as a separate checkpoint.
+func (s *Service) Confirm(context.Context) error { return nil }
 
 func (s *Service) presignedPutURL(key string, expiresAt time.Time) string {
 	host := fmt.Sprintf("%s.cos.%s.myqcloud.com", s.bucket, s.region)

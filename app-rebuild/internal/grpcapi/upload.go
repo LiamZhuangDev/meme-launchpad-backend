@@ -13,7 +13,8 @@ import (
 )
 
 type UploadPresigner interface {
-	Presign(folder, mimeType string, chainID int) (upload.PresignResult, error)
+	Presign(context.Context, string, string, int) (upload.PresignResult, error)
+	Confirm(context.Context) error
 }
 
 type uploadHandler struct {
@@ -45,7 +46,7 @@ func (h *uploadHandler) PresignImage(ctx context.Context, request *uploadv1.Pres
 			return nil, status.Error(codes.InvalidArgument, "chain_id must be positive")
 		}
 	}
-	result, err := h.uploads.Presign(folder, mimeType, int(chainID))
+	result, err := h.uploads.Presign(ctx, folder, mimeType, int(chainID))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -61,6 +62,9 @@ func (h *uploadHandler) PresignImage(ctx context.Context, request *uploadv1.Pres
 func (h *uploadHandler) ConfirmUpload(ctx context.Context, _ *uploadv1.ConfirmUploadRequest) (*uploadv1.ConfirmUploadResponse, error) {
 	if _, err := bearerClaims(ctx, h.auth); err != nil {
 		return nil, err
+	}
+	if err := h.uploads.Confirm(ctx); err != nil {
+		return nil, status.Error(codes.Internal, "failed to confirm upload")
 	}
 	return &uploadv1.ConfirmUploadResponse{Ok: true}, nil
 }

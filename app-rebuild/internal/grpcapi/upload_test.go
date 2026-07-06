@@ -17,13 +17,15 @@ type fakeUploadPresigner struct {
 	chainID  int
 }
 
-func (f *fakeUploadPresigner) Presign(folder, mimeType string, chainID int) (upload.PresignResult, error) {
+func (f *fakeUploadPresigner) Presign(_ context.Context, folder, mimeType string, chainID int) (upload.PresignResult, error) {
 	f.folder, f.mimeType, f.chainID = folder, mimeType, chainID
 	return upload.PresignResult{
 		UploadURL: "https://upload.example", PublicURL: "https://cdn.example/image.webp",
 		FileName: "image.webp", Key: folder + "/image.webp", Expires: 1_700_000_000,
 	}, nil
 }
+
+func (f *fakeUploadPresigner) Confirm(context.Context) error { return nil }
 
 func TestUploadPresignMapsImageKindAndRequiresAuthentication(t *testing.T) {
 	const secret = "test-secret"
