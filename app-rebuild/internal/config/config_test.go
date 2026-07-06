@@ -36,26 +36,30 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestLoadReadsEnvironment(t *testing.T) {
 	values := map[string]string{
-		"APP_NAME":                "local-api",
-		"HTTP_HOST":               "192.0.2.10",
-		"HTTP_PORT":               "48080",
-		"GRPC_HOST":               "10.0.0.10",
-		"GRPC_PORT":               "49090",
-		"TOKEN_SERVICE_GRPC_HOST": "10.0.0.11",
-		"TOKEN_SERVICE_GRPC_PORT": "49100",
-		"GRPC_TLS_CERT_FILE":      "/certs/server.crt",
-		"GRPC_TLS_KEY_FILE":       "/certs/server.key",
-		"GRPC_TLS_CLIENT_CA_FILE": "/certs/ca.crt",
-		"GRPC_ALLOWED_CLIENT_IDS": "spiffe://meme/client,worker",
-		"DATABASE_URL":            "postgres://local/test",
-		"REDIS_ADDR":              "localhost:6379",
-		"REDIS_PASSWORD":          "secret",
-		"REDIS_DB":                "2",
-		"COS_SECRET_ID":           "cos-id",
-		"COS_SECRET_KEY":          "cos-key",
-		"COS_BUCKET":              "bucket",
-		"COS_REGION":              "ap-guangzhou",
-		"COS_DOMAIN":              "https://cdn.example",
+		"APP_NAME":                       "local-api",
+		"HTTP_HOST":                      "192.0.2.10",
+		"HTTP_PORT":                      "48080",
+		"GRPC_HOST":                      "10.0.0.10",
+		"GRPC_PORT":                      "49090",
+		"TOKEN_SERVICE_GRPC_HOST":        "10.0.0.11",
+		"TOKEN_SERVICE_GRPC_PORT":        "49100",
+		"TOKEN_SERVICE_GRPC_CA_FILE":     "/certs/ca.crt",
+		"TOKEN_SERVICE_GRPC_CERT_FILE":   "/certs/api-client.crt",
+		"TOKEN_SERVICE_GRPC_KEY_FILE":    "/certs/api-client.key",
+		"TOKEN_SERVICE_GRPC_SERVER_NAME": "token-service",
+		"GRPC_TLS_CERT_FILE":             "/certs/server.crt",
+		"GRPC_TLS_KEY_FILE":              "/certs/server.key",
+		"GRPC_TLS_CLIENT_CA_FILE":        "/certs/ca.crt",
+		"GRPC_ALLOWED_CLIENT_IDS":        "spiffe://meme/client,worker",
+		"DATABASE_URL":                   "postgres://local/test",
+		"REDIS_ADDR":                     "localhost:6379",
+		"REDIS_PASSWORD":                 "secret",
+		"REDIS_DB":                       "2",
+		"COS_SECRET_ID":                  "cos-id",
+		"COS_SECRET_KEY":                 "cos-key",
+		"COS_BUCKET":                     "bucket",
+		"COS_REGION":                     "ap-guangzhou",
+		"COS_DOMAIN":                     "https://cdn.example",
 	}
 
 	config, err := Load(func(key string) (string, bool) {
@@ -71,6 +75,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if config.TokenService.Address() != "10.0.0.11:49100" {
 		t.Fatalf("token service config = %+v", config.TokenService)
+	}
+	if !config.TokenService.TLS.Enabled() || config.TokenService.TLS.ServerName != "token-service" {
+		t.Fatalf("token service TLS config = %+v", config.TokenService.TLS)
 	}
 	if config.Redis.Addr != "localhost:6379" || config.Redis.Password != "secret" || config.Redis.DB != 2 {
 		t.Fatalf("redis config = %+v", config.Redis)
@@ -116,6 +123,38 @@ func TestLoadRejectsInvalidTokenServiceGRPCPort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want invalid token-service gRPC port error")
+	}
+}
+
+func TestLoadRejectsPartialTokenServiceGRPCTLSConfig(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "TOKEN_SERVICE_GRPC_CA_FILE" {
+			return "/certs/ca.crt", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want partial token-service gRPC TLS config error")
+	}
+}
+
+func TestLoadAllowsRemoteTokenServiceWithClientTLS(t *testing.T) {
+	values := map[string]string{
+		"TOKEN_SERVICE_GRPC_HOST":        "token-service.internal",
+		"TOKEN_SERVICE_GRPC_CA_FILE":     "/certs/ca.crt",
+		"TOKEN_SERVICE_GRPC_CERT_FILE":   "/certs/api-client.crt",
+		"TOKEN_SERVICE_GRPC_KEY_FILE":    "/certs/api-client.key",
+		"TOKEN_SERVICE_GRPC_SERVER_NAME": "token-service.internal",
+	}
+	config, err := Load(func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
+	})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if config.TokenService.Host != "token-service.internal" || !config.TokenService.TLS.Enabled() {
+		t.Fatalf("token service config = %+v", config.TokenService)
 	}
 }
 

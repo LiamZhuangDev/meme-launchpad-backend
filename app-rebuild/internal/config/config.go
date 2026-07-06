@@ -59,9 +59,20 @@ type GRPCTLSConfig struct {
 type TokenServiceConfig struct {
 	Host string
 	Port int
+	TLS  GRPCClientTLSConfig
+}
+
+type GRPCClientTLSConfig struct {
+	CAFile     string
+	CertFile   string
+	KeyFile    string
+	ServerName string
 }
 
 func (c GRPCTLSConfig) Enabled() bool { return c.CertFile != "" }
+func (c GRPCClientTLSConfig) Enabled() bool {
+	return c.CAFile != "" || c.CertFile != "" || c.KeyFile != "" || c.ServerName != ""
+}
 
 func (c HTTPConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 func (c GRPCConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
@@ -185,6 +196,18 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 		config.TokenService.Port = port
 	}
+	if value, ok := lookup("TOKEN_SERVICE_GRPC_CA_FILE"); ok && value != "" {
+		config.TokenService.TLS.CAFile = value
+	}
+	if value, ok := lookup("TOKEN_SERVICE_GRPC_CERT_FILE"); ok && value != "" {
+		config.TokenService.TLS.CertFile = value
+	}
+	if value, ok := lookup("TOKEN_SERVICE_GRPC_KEY_FILE"); ok && value != "" {
+		config.TokenService.TLS.KeyFile = value
+	}
+	if value, ok := lookup("TOKEN_SERVICE_GRPC_SERVER_NAME"); ok && value != "" {
+		config.TokenService.TLS.ServerName = value
+	}
 	if value, ok := lookup("GRPC_TLS_CERT_FILE"); ok && value != "" {
 		config.GRPC.TLS.CertFile = value
 	}
@@ -204,11 +227,11 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := config.GRPC.TLS.Validate(); err != nil {
 		return Config{}, err
 	}
+	if err := config.TokenService.TLS.Validate(); err != nil {
+		return Config{}, err
+	}
 	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.GRPC.Host) {
 		return Config{}, fmt.Errorf("gRPC TLS is required when GRPC_HOST is not loopback")
-	}
-	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.TokenService.Host) {
-		return Config{}, fmt.Errorf("gRPC TLS is required when TOKEN_SERVICE_GRPC_HOST is not loopback")
 	}
 
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
@@ -307,6 +330,19 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 
 	return config, nil
+}
+
+func (c GRPCClientTLSConfig) Validate() error {
+	configured := 0
+	for _, value := range []string{c.CAFile, c.CertFile, c.KeyFile, c.ServerName} {
+		if value != "" {
+			configured++
+		}
+	}
+	if configured != 0 && configured != 4 {
+		return fmt.Errorf("TOKEN_SERVICE_GRPC_CA_FILE, TOKEN_SERVICE_GRPC_CERT_FILE, TOKEN_SERVICE_GRPC_KEY_FILE, and TOKEN_SERVICE_GRPC_SERVER_NAME must be set together")
+	}
+	return nil
 }
 
 // Validate verifies the values required when cmd/indexer is started.

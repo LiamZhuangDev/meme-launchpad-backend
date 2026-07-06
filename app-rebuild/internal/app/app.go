@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/config"
 	"github.com/meme-launchpad/app-rebuild/internal/database"
 	"github.com/meme-launchpad/app-rebuild/internal/grpcapi"
+	"github.com/meme-launchpad/app-rebuild/internal/grpcclient"
+	"github.com/meme-launchpad/app-rebuild/internal/grpcsecurity"
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
 	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
@@ -29,10 +32,11 @@ type Application struct {
 	DB            *pgxpool.Pool
 	Redis         *redis.Client
 	Users         *repository.UserRepository
-	Tokens        *repository.TokenRepository
+	TokenReader   httpapi.TokenReader
 	Auth          *auth.Service
 	TokenCreation *tokencreation.Service
 	Uploads       *upload.Service
+	tokenService  *grpc.ClientConn
 }
 
 // New opens the process-wide PostgreSQL pool and wires repositories to it.
@@ -41,7 +45,15 @@ func New(ctx context.Context, cfg config.Config) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewWithPool(cfg, pool), nil
+	application := NewWithPool(cfg, pool)
+	connection, reader, err := connectTokenService(ctx, cfg.TokenService)
+	if err != nil {
+		application.Close()
+		return nil, err
+	}
+	application.tokenService = connection
+	application.TokenReader = reader
+	return application, nil
 }
 
 // NewWithPool is useful for tests and future commands that own an existing pool.
@@ -52,7 +64,6 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 	}
 	if pool != nil {
 		application.Users = repository.NewUserRepository(pool)
-		application.Tokens = repository.NewTokenRepository(pool)
 		challengeStore := auth.ChallengeStore(auth.NewMemoryChallengeStore())
 		if application.Redis != nil {
 			challengeStore = auth.NewRedisChallengeStore(application.Redis, "")
@@ -65,6 +76,9 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 }
 
 func (a *Application) Close() {
+	if a.tokenService != nil {
+		_ = a.tokenService.Close()
+	}
 	if a.Redis != nil {
 		_ = a.Redis.Close()
 	}
@@ -76,16 +90,13 @@ func (a *Application) Close() {
 func (a *Application) HTTPServer() *http.Server {
 	return &http.Server{
 		Addr:              a.Config.HTTP.Address(),
-		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.Tokens, a.TokenCreation, a.Uploads),
+		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.TokenReader, a.TokenCreation, a.Uploads),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
 
 func (a *Application) GRPCServer(options ...grpc.ServerOption) *grpc.Server {
 	dependencies := grpcapi.Dependencies{}
-	if a.Tokens != nil {
-		dependencies.Tokens = a.Tokens
-	}
 	if a.Auth != nil {
 		dependencies.Auth = a.Auth
 		if a.TokenCreation != nil {
@@ -96,6 +107,28 @@ func (a *Application) GRPCServer(options ...grpc.ServerOption) *grpc.Server {
 		}
 	}
 	return grpcapi.NewServer(a.Config.ServiceName, dependencies, options...)
+}
+
+func connectTokenService(ctx context.Context, cfg config.TokenServiceConfig) (*grpc.ClientConn, *grpcclient.TokenReader, error) {
+	target := cfg.Address()
+	if !cfg.TLS.Enabled() && !grpcsecurity.IsLoopbackTarget(target) {
+		return nil, nil, fmt.Errorf("token-service mutual TLS is required when %s is not loopback", target)
+	}
+	credentials, err := grpcsecurity.ClientCredentials(grpcsecurity.ClientTLSConfig{
+		CAFile: cfg.TLS.CAFile, CertFile: cfg.TLS.CertFile, KeyFile: cfg.TLS.KeyFile, ServerName: cfg.TLS.ServerName,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure token-service gRPC client: %w", err)
+	}
+	connection, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(credentials), grpc.WithBlock())
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect to token service at %s: %w", target, err)
+	}
+	if err := grpcclient.New(connection).CheckHealth(ctx, "meme-token-service"); err != nil {
+		_ = connection.Close()
+		return nil, nil, fmt.Errorf("verify token service at %s: %w", target, err)
+	}
+	return connection, grpcclient.NewTokenReader(connection), nil
 }
 
 func newUploadService(cfg config.Config) *upload.Service {

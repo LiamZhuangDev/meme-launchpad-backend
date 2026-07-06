@@ -42,6 +42,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("configure token-service gRPC security: %v", err)
 	}
+	if !cfg.GRPC.TLS.Enabled() && !grpcsecurity.IsLoopbackTarget(cfg.TokenService.Address()) {
+		log.Fatal("mutual TLS is required when TOKEN_SERVICE_GRPC_HOST is not loopback")
+	}
 	server := grpcapi.NewServer(serviceName, grpcapi.Dependencies{
 		Tokens: repository.NewTokenRepository(pool),
 	}, options...)

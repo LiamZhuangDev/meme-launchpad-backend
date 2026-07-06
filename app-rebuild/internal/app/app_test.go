@@ -1,12 +1,25 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/meme-launchpad/app-rebuild/internal/config"
+	"github.com/meme-launchpad/app-rebuild/internal/repository"
 )
+
+type fakeTokenReader struct{}
+
+func (fakeTokenReader) List(context.Context, int, int) ([]repository.Token, error) {
+	return []repository.Token{{ID: 1, Symbol: "MEME"}}, nil
+}
+
+func (fakeTokenReader) FindByAddress(context.Context, string) (repository.Token, error) {
+	return repository.Token{ID: 1, Symbol: "MEME"}, nil
+}
 
 func TestHTTPServerUsesConfiguration(t *testing.T) {
 	application := NewWithPool(config.Config{
@@ -30,10 +43,38 @@ func TestHTTPServerUsesConfiguration(t *testing.T) {
 
 func TestGRPCServerIsConfigured(t *testing.T) {
 	application := NewWithPool(config.Config{ServiceName: "test-api"}, nil)
+	application.TokenReader = fakeTokenReader{}
 	server := application.GRPCServer()
 	t.Cleanup(server.Stop)
 
 	if _, ok := server.GetServiceInfo()["grpc.health.v1.Health"]; !ok {
 		t.Fatal("standard gRPC health service is not registered")
+	}
+	if _, ok := server.GetServiceInfo()["meme.token.v1.TokenService"]; ok {
+		t.Fatal("API gRPC server must not own the extracted token service")
+	}
+}
+
+func TestHTTPServerUsesOutboundTokenReader(t *testing.T) {
+	application := NewWithPool(config.Config{ServiceName: "test-api"}, nil)
+	application.TokenReader = fakeTokenReader{}
+	server := application.HTTPServer()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/token/list", nil)
+	recorder := httptest.NewRecorder()
+	server.Handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"symbol":"MEME"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestConnectTokenServiceRejectsRemotePlaintext(t *testing.T) {
+	_, _, err := connectTokenService(context.Background(), config.TokenServiceConfig{Host: "10.0.0.20", Port: 39100})
+	if err == nil {
+		t.Fatal("connectTokenService() error = nil, want mTLS requirement")
 	}
 }

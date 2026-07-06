@@ -28,7 +28,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 11.3 — private-network mutual TLS and service identity
 - [x] Step 12.1 — standalone internal token-read gRPC service
 - [x] Step 12.2 — REST-to-gRPC token reader adapter
-- [ ] Step 12.3 — switch REST token reads and remove duplicate ownership
+- [x] Step 12.3 — switch REST token reads and remove duplicate ownership
 
 ## Step 1: run the foundation
 
@@ -958,3 +958,101 @@ change `Application.HTTPServer()`. REST therefore still reads PostgreSQL
 directly while the adapter is tested independently. Step 12.3 will wire this
 adapter into REST and move token-read ownership fully behind the standalone
 gRPC service.
+
+## Step 12.3: route REST token reads through internal gRPC
+
+The API composition root now opens a persistent gRPC connection to the
+standalone token service during startup. The public REST handlers are
+unchanged, but their `TokenReader` implementation is now the Step 12.2 gRPC
+adapter:
+
+```text
+Browser
+  -> REST :38081
+  -> httpapi token handler
+  -> grpcclient.TokenReader
+  -> TokenService gRPC :39100
+  -> TokenRepository
+  -> PostgreSQL
+```
+
+The API no longer constructs a `TokenRepository` for reads and no longer
+registers `meme.token.v1.TokenService` on its own `:39090` gRPC listener. That
+listener remains available for the auth, token-creation, and upload services.
+The outbound token-service connection is closed with the rest of the API's
+owned resources.
+
+Start the processes in this order:
+
+```bash
+# Terminal 1: restart the PostgreSQL container created in Step 3
+docker start meme-launchpad-postgres
+
+# Terminal 2: extracted internal service
+go run ./cmd/token-service
+
+# Terminal 3: public REST API
+go run ./cmd/api
+```
+
+This project does not include a Docker Compose file. On the first run, create
+the PostgreSQL container with the `docker run` command in Step 3 instead of
+`docker start`, then apply the migrations before starting the two Go processes.
+
+Then the existing browser-facing request crosses the new internal boundary:
+
+```bash
+curl 'http://localhost:38081/api/v1/token/list?page=1&pageSize=20'
+```
+
+The API waits for `TOKEN_SERVICE_GRPC_HOST:TOKEN_SERVICE_GRPC_PORT` during
+startup, verifies the `meme-token-service` health status, and fails fast if it
+cannot connect to the expected service. Loopback development is plaintext.
+
+For private-network mTLS, configure the API's client identity separately from
+the token service's server identity:
+
+| API environment variable | Purpose |
+| --- | --- |
+| `TOKEN_SERVICE_GRPC_CA_FILE` | CA that issued the token-service server certificate |
+| `TOKEN_SERVICE_GRPC_CERT_FILE` | API's client certificate |
+| `TOKEN_SERVICE_GRPC_KEY_FILE` | API's client private key |
+| `TOKEN_SERVICE_GRPC_SERVER_NAME` | Expected token-service DNS identity |
+
+All four client TLS variables must be set together, and a non-loopback target
+is rejected without them.
+
+Generate development certificates once from `app-rebuild`:
+
+```bash
+./scripts/generate-dev-mtls.sh
+```
+
+Start the token service with its server certificate and the client identity it
+allows:
+
+```bash
+GRPC_TLS_CERT_FILE=.local-certs/server.crt \
+GRPC_TLS_KEY_FILE=.local-certs/server.key \
+GRPC_TLS_CLIENT_CA_FILE=.local-certs/ca.crt \
+GRPC_ALLOWED_CLIENT_IDS='spiffe://meme-launchpad/internal-client' \
+go run ./cmd/token-service
+```
+
+In another terminal, start the REST API with its token-service client
+certificate:
+
+```bash
+TOKEN_SERVICE_GRPC_HOST=127.0.0.1 \
+TOKEN_SERVICE_GRPC_PORT=39100 \
+TOKEN_SERVICE_GRPC_CA_FILE=.local-certs/ca.crt \
+TOKEN_SERVICE_GRPC_CERT_FILE=.local-certs/internal-client.crt \
+TOKEN_SERVICE_GRPC_KEY_FILE=.local-certs/internal-client.key \
+TOKEN_SERVICE_GRPC_SERVER_NAME=localhost \
+go run ./cmd/api
+```
+
+During the handshake, the API verifies that the token-service certificate is
+valid for `localhost`. The token service verifies that the API certificate was
+issued by the development CA and carries the allowed
+`spiffe://meme-launchpad/internal-client` identity.
