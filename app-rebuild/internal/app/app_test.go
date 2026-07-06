@@ -11,14 +11,22 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/config"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
 	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
+	"github.com/meme-launchpad/app-rebuild/internal/upload"
 )
 
 type fakeTokenReader struct{}
 type fakeTokenCreator struct{}
+type fakeUploadService struct{}
 
 func (fakeTokenCreator) Create(context.Context, tokencreation.Request) (tokencreation.Response, error) {
 	return tokencreation.Response{}, nil
 }
+
+func (fakeUploadService) Presign(context.Context, string, string, int) (upload.PresignResult, error) {
+	return upload.PresignResult{}, nil
+}
+
+func (fakeUploadService) Confirm(context.Context) error { return nil }
 
 func (fakeTokenReader) List(context.Context, int, int) ([]repository.Token, error) {
 	return []repository.Token{{ID: 1, Symbol: "MEME"}}, nil
@@ -52,6 +60,7 @@ func TestGRPCServerIsConfigured(t *testing.T) {
 	application := NewWithPool(config.Config{ServiceName: "test-api"}, nil)
 	application.TokenReader = fakeTokenReader{}
 	application.TokenCreator = fakeTokenCreator{}
+	application.Uploads = fakeUploadService{}
 	application.Auth = auth.New(nil, "test-secret", auth.SIWEConfig{})
 	server := application.GRPCServer()
 	t.Cleanup(server.Stop)
@@ -64,6 +73,9 @@ func TestGRPCServerIsConfigured(t *testing.T) {
 	}
 	if _, ok := server.GetServiceInfo()["meme.tokencreation.v1.TokenCreationService"]; ok {
 		t.Fatal("API gRPC server must not own the extracted token-creation service")
+	}
+	if _, ok := server.GetServiceInfo()["meme.upload.v1.UploadService"]; ok {
+		t.Fatal("API gRPC server must not own the extracted upload service")
 	}
 }
 
@@ -95,5 +107,12 @@ func TestConnectTokenCreationServiceRejectsRemotePlaintext(t *testing.T) {
 	_, _, err := connectTokenCreationService(context.Background(), config.TokenCreationServiceConfig{Host: "10.0.0.21", Port: 39200})
 	if err == nil {
 		t.Fatal("connectTokenCreationService() error = nil, want mTLS requirement")
+	}
+}
+
+func TestConnectUploadServiceRejectsRemotePlaintext(t *testing.T) {
+	_, _, err := connectUploadService(context.Background(), config.UploadServiceConfig{Host: "10.0.0.22", Port: 39300})
+	if err == nil {
+		t.Fatal("connectUploadService() error = nil, want mTLS requirement")
 	}
 }

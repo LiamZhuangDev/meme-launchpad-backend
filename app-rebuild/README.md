@@ -34,7 +34,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 13.3 — switch REST token creation and remove duplicate ownership
 - [x] Step 14.1 — standalone internal upload gRPC service
 - [x] Step 14.2 — REST-to-gRPC upload adapter
-- [ ] Step 14.3 — switch REST uploads and remove duplicate ownership
+- [x] Step 14.3 — switch REST uploads and remove duplicate ownership
 
 ## Step 1: run the foundation
 
@@ -1331,3 +1331,87 @@ This checkpoint does not connect `cmd/api` to `:39300`; REST still uses its
 local COS signer. Step 14.3 will manage the upload-service connection, verify
 the `meme-upload-service` health identity, cut REST over, and remove upload
 from the API's own `:39090` gRPC listener.
+
+## Step 14.3: route REST uploads through internal gRPC
+
+The API composition root now owns a third internal gRPC connection. Both
+presigning and confirmation cross the upload-service boundary:
+
+```text
+Browser
+  -> REST upload route :38081
+  -> httpapi Presigner interface
+  -> grpcclient.UploadService
+  -> UploadService gRPC :39300
+  -> upload.Service
+  -> signed COS URL
+```
+
+`cmd/api` no longer constructs `upload.Service`, reads COS credentials for its
+own use, or exposes `meme.upload.v1.UploadService` on `:39090`. Only
+`cmd/upload-service` owns COS signing. The API verifies the
+`meme-upload-service` health identity during startup and closes the connection
+during shutdown.
+
+The complete local run order is now:
+
+```bash
+# Terminal 1
+docker start meme-launchpad-postgres
+
+# Terminal 2
+go run ./cmd/token-service
+
+# Terminal 3: include all Step 13.1 contract variables
+JWT_SECRET='shared-secret' \
+TOKEN_CREATION_CHAIN_ID='97' \
+TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
+TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
+TOKEN_CREATION_SIGNER_KEY='your-signer-private-key' \
+TOKEN_CREATION_BYTECODE='0xYourCompiledTokenCreationBytecode' \
+go run ./cmd/token-creation-service
+
+# Terminal 4
+JWT_SECRET='shared-secret' \
+COS_SECRET_ID='replace-me' \
+COS_SECRET_KEY='replace-me' \
+COS_BUCKET='your-bucket' \
+COS_REGION='ap-guangzhou' \
+go run ./cmd/upload-service
+
+# Terminal 5: JWT_SECRET matches the protected internal services
+JWT_SECRET='shared-secret' go run ./cmd/api
+```
+
+The three internal health identities are:
+
+```text
+127.0.0.1:39100 -> meme-token-service
+127.0.0.1:39200 -> meme-token-creation-service
+127.0.0.1:39300 -> meme-upload-service
+```
+
+For mTLS, configure the API's upload-service client role separately:
+
+| API environment variable | Purpose |
+| --- | --- |
+| `UPLOAD_SERVICE_GRPC_CA_FILE` | CA that issued the upload server certificate |
+| `UPLOAD_SERVICE_GRPC_CERT_FILE` | API's client certificate |
+| `UPLOAD_SERVICE_GRPC_KEY_FILE` | API's client private key |
+| `UPLOAD_SERVICE_GRPC_SERVER_NAME` | Expected upload server DNS identity |
+
+Development example:
+
+```bash
+JWT_SECRET='shared-secret' \
+UPLOAD_SERVICE_GRPC_CA_FILE=.local-certs/ca.crt \
+UPLOAD_SERVICE_GRPC_CERT_FILE=.local-certs/internal-client.crt \
+UPLOAD_SERVICE_GRPC_KEY_FILE=.local-certs/internal-client.key \
+UPLOAD_SERVICE_GRPC_SERVER_NAME=localhost \
+go run ./cmd/api
+```
+
+When all three standalone services use mTLS, combine this group with the
+token-read and token-creation client variables documented in Steps 12.3 and
+13.3. A non-loopback upload target is rejected without all four client TLS
+values.

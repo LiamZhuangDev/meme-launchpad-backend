@@ -53,6 +53,10 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		"TOKEN_CREATION_SERVICE_GRPC_PORT":        "49200",
 		"UPLOAD_SERVICE_GRPC_HOST":                "10.0.0.13",
 		"UPLOAD_SERVICE_GRPC_PORT":                "49300",
+		"UPLOAD_SERVICE_GRPC_CA_FILE":             "/certs/ca.crt",
+		"UPLOAD_SERVICE_GRPC_CERT_FILE":           "/certs/api-client.crt",
+		"UPLOAD_SERVICE_GRPC_KEY_FILE":            "/certs/api-client.key",
+		"UPLOAD_SERVICE_GRPC_SERVER_NAME":         "upload-service",
 		"TOKEN_CREATION_SERVICE_GRPC_CA_FILE":     "/certs/ca.crt",
 		"TOKEN_CREATION_SERVICE_GRPC_CERT_FILE":   "/certs/api-client.crt",
 		"TOKEN_CREATION_SERVICE_GRPC_KEY_FILE":    "/certs/api-client.key",
@@ -95,6 +99,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if config.UploadService.Address() != "10.0.0.13:49300" {
 		t.Fatalf("upload service config = %+v", config.UploadService)
+	}
+	if !config.UploadService.TLS.Enabled() || config.UploadService.TLS.ServerName != "upload-service" {
+		t.Fatalf("upload service TLS config = %+v", config.UploadService.TLS)
 	}
 	if !config.TokenCreationService.TLS.Enabled() || config.TokenCreationService.TLS.ServerName != "token-creation-service" {
 		t.Fatalf("token creation service TLS config = %+v", config.TokenCreationService.TLS)
@@ -194,6 +201,18 @@ func TestLoadRejectsPartialTokenCreationServiceGRPCTLSConfig(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want partial token-creation service gRPC TLS config error")
+	}
+}
+
+func TestLoadRejectsPartialUploadServiceGRPCTLSConfig(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "UPLOAD_SERVICE_GRPC_CA_FILE" {
+			return "/certs/ca.crt", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want partial upload service gRPC TLS config error")
 	}
 }
 

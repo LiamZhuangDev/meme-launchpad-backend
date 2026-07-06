@@ -16,7 +16,6 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/grpcsecurity"
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
-	"github.com/meme-launchpad/app-rebuild/internal/upload"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
@@ -27,12 +26,13 @@ type Application struct {
 	DB                   *pgxpool.Pool
 	Redis                *redis.Client
 	Users                *repository.UserRepository
-	TokenReader          httpapi.TokenReader
 	Auth                 *auth.Service
+	TokenReader          httpapi.TokenReader
 	TokenCreator         httpapi.TokenCreator
-	Uploads              *upload.Service
+	Uploads              httpapi.Presigner
 	tokenService         *grpc.ClientConn
 	tokenCreationService *grpc.ClientConn
+	uploadService        *grpc.ClientConn
 }
 
 // New opens the process-wide PostgreSQL pool and wires repositories to it.
@@ -56,6 +56,13 @@ func New(ctx context.Context, cfg config.Config) (*Application, error) {
 	}
 	application.tokenCreationService = creationConnection
 	application.TokenCreator = creator
+	uploadConnection, uploads, err := connectUploadService(ctx, cfg.UploadService)
+	if err != nil {
+		application.Close()
+		return nil, err
+	}
+	application.uploadService = uploadConnection
+	application.Uploads = uploads
 	return application, nil
 }
 
@@ -73,7 +80,6 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 		}
 		application.Auth = auth.NewWithChallengeStore(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE), challengeStore)
 	}
-	application.Uploads = newUploadService(cfg)
 	return application
 }
 
@@ -83,6 +89,9 @@ func (a *Application) Close() {
 	}
 	if a.tokenCreationService != nil {
 		_ = a.tokenCreationService.Close()
+	}
+	if a.uploadService != nil {
+		_ = a.uploadService.Close()
 	}
 	if a.Redis != nil {
 		_ = a.Redis.Close()
@@ -104,11 +113,30 @@ func (a *Application) GRPCServer(options ...grpc.ServerOption) *grpc.Server {
 	dependencies := grpcapi.Dependencies{}
 	if a.Auth != nil {
 		dependencies.Auth = a.Auth
-		if a.Uploads != nil {
-			dependencies.Uploads = a.Uploads
-		}
 	}
 	return grpcapi.NewServer(a.Config.ServiceName, dependencies, options...)
+}
+
+func connectUploadService(ctx context.Context, cfg config.UploadServiceConfig) (*grpc.ClientConn, *grpcclient.UploadService, error) {
+	target := cfg.Address()
+	if !cfg.TLS.Enabled() && !grpcsecurity.IsLoopbackTarget(target) {
+		return nil, nil, fmt.Errorf("upload-service mutual TLS is required when %s is not loopback", target)
+	}
+	credentials, err := grpcsecurity.ClientCredentials(grpcsecurity.ClientTLSConfig{
+		CAFile: cfg.TLS.CAFile, CertFile: cfg.TLS.CertFile, KeyFile: cfg.TLS.KeyFile, ServerName: cfg.TLS.ServerName,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure upload-service gRPC client: %w", err)
+	}
+	connection, err := grpc.DialContext(ctx, target, grpc.WithTransportCredentials(credentials), grpc.WithBlock())
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect to upload service at %s: %w", target, err)
+	}
+	if err := grpcclient.New(connection).CheckHealth(ctx, "meme-upload-service"); err != nil {
+		_ = connection.Close()
+		return nil, nil, fmt.Errorf("verify upload service at %s: %w", target, err)
+	}
+	return connection, grpcclient.NewUploadService(connection), nil
 }
 
 func connectTokenCreationService(ctx context.Context, cfg config.TokenCreationServiceConfig) (*grpc.ClientConn, *grpcclient.TokenCreator, error) {
@@ -153,15 +181,4 @@ func connectTokenService(ctx context.Context, cfg config.TokenServiceConfig) (*g
 		return nil, nil, fmt.Errorf("verify token service at %s: %w", target, err)
 	}
 	return connection, grpcclient.NewTokenReader(connection), nil
-}
-
-func newUploadService(cfg config.Config) *upload.Service {
-	if cfg.COS.SecretID == "" && cfg.COS.SecretKey == "" && cfg.COS.Bucket == "" && cfg.COS.Region == "" && cfg.COS.Domain == "" {
-		return nil
-	}
-	service, err := upload.New(cfg.COS)
-	if err != nil {
-		return nil
-	}
-	return service
 }

@@ -77,6 +77,7 @@ type TokenCreationServiceConfig struct {
 type UploadServiceConfig struct {
 	Host string
 	Port int
+	TLS  GRPCClientTLSConfig
 }
 
 type GRPCClientTLSConfig struct {
@@ -273,6 +274,18 @@ func Load(lookup LookupEnv) (Config, error) {
 	if value, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_SERVER_NAME"); ok && value != "" {
 		config.TokenCreationService.TLS.ServerName = value
 	}
+	if value, ok := lookup("UPLOAD_SERVICE_GRPC_CA_FILE"); ok && value != "" {
+		config.UploadService.TLS.CAFile = value
+	}
+	if value, ok := lookup("UPLOAD_SERVICE_GRPC_CERT_FILE"); ok && value != "" {
+		config.UploadService.TLS.CertFile = value
+	}
+	if value, ok := lookup("UPLOAD_SERVICE_GRPC_KEY_FILE"); ok && value != "" {
+		config.UploadService.TLS.KeyFile = value
+	}
+	if value, ok := lookup("UPLOAD_SERVICE_GRPC_SERVER_NAME"); ok && value != "" {
+		config.UploadService.TLS.ServerName = value
+	}
 	if value, ok := lookup("GRPC_TLS_CERT_FILE"); ok && value != "" {
 		config.GRPC.TLS.CertFile = value
 	}
@@ -296,6 +309,9 @@ func Load(lookup LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if err := config.TokenCreationService.TLS.Validate("TOKEN_CREATION_SERVICE_GRPC"); err != nil {
+		return Config{}, err
+	}
+	if err := config.UploadService.TLS.Validate("UPLOAD_SERVICE_GRPC"); err != nil {
 		return Config{}, err
 	}
 	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.GRPC.Host) {
