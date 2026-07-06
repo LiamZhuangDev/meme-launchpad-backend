@@ -19,8 +19,12 @@ import (
 // Authenticator is the authentication capability consumed by the gRPC
 // transport. auth.Service also remains independently available to REST.
 type Authenticator interface {
+	TokenParser
 	RequestMessage(context.Context, string) (auth.SignMessage, error)
 	Login(context.Context, string, string) (auth.LoginResult, error)
+}
+
+type TokenParser interface {
 	ParseToken(string) (auth.Claims, error)
 }
 
@@ -72,7 +76,7 @@ func (h *authHandler) GetCurrentUser(ctx context.Context, _ *authv1.GetCurrentUs
 	return response, nil
 }
 
-func bearerClaims(ctx context.Context, authenticator Authenticator) (auth.Claims, error) {
+func bearerClaims(ctx context.Context, authenticator TokenParser) (auth.Claims, error) {
 	values := metadata.ValueFromIncomingContext(ctx, "authorization")
 	if len(values) == 0 {
 		return auth.Claims{}, status.Error(codes.Unauthenticated, "missing bearer token")

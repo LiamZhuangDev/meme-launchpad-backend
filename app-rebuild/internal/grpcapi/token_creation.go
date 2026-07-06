@@ -20,11 +20,11 @@ type TokenCreator interface {
 
 type tokenCreationHandler struct {
 	tokencreationv1.UnimplementedTokenCreationServiceServer
-	auth    Authenticator
+	auth    TokenParser
 	creator TokenCreator
 }
 
-func registerTokenCreationService(server *grpc.Server, authenticator Authenticator, creator TokenCreator) {
+func registerTokenCreationService(server *grpc.Server, authenticator TokenParser, creator TokenCreator) {
 	tokencreationv1.RegisterTokenCreationServiceServer(server, &tokenCreationHandler{auth: authenticator, creator: creator})
 }
 

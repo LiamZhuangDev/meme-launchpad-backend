@@ -13,29 +13,32 @@ import (
 )
 
 const (
-	defaultServiceName      = "meme-launchpad-rebuild-api"
-	defaultHTTPHost         = "0.0.0.0"
-	defaultHTTPPort         = 38081
-	defaultGRPCHost         = "127.0.0.1"
-	defaultGRPCPort         = 39090
-	defaultTokenServiceHost = "127.0.0.1"
-	defaultTokenServicePort = 39100
-	defaultDatabaseURL      = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
+	defaultServiceName              = "meme-launchpad-rebuild-api"
+	defaultHTTPHost                 = "0.0.0.0"
+	defaultHTTPPort                 = 38081
+	defaultGRPCHost                 = "127.0.0.1"
+	defaultGRPCPort                 = 39090
+	defaultTokenServiceHost         = "127.0.0.1"
+	defaultTokenServicePort         = 39100
+	defaultTokenCreationServiceHost = "127.0.0.1"
+	defaultTokenCreationServicePort = 39200
+	defaultDatabaseURL              = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
 )
 
 // Config contains the process configuration shared by the API and indexer
 // composition roots.
 type Config struct {
-	ServiceName   string
-	HTTP          HTTPConfig
-	GRPC          GRPCConfig
-	TokenService  TokenServiceConfig
-	Database      DatabaseConfig
-	Redis         RedisConfig
-	Auth          AuthConfig
-	TokenCreation TokenCreationConfig
-	Indexer       IndexerConfig
-	COS           COSConfig
+	ServiceName          string
+	HTTP                 HTTPConfig
+	GRPC                 GRPCConfig
+	TokenService         TokenServiceConfig
+	TokenCreationService TokenCreationServiceConfig
+	Database             DatabaseConfig
+	Redis                RedisConfig
+	Auth                 AuthConfig
+	TokenCreation        TokenCreationConfig
+	Indexer              IndexerConfig
+	COS                  COSConfig
 }
 
 type HTTPConfig struct {
@@ -62,6 +65,11 @@ type TokenServiceConfig struct {
 	TLS  GRPCClientTLSConfig
 }
 
+type TokenCreationServiceConfig struct {
+	Host string
+	Port int
+}
+
 type GRPCClientTLSConfig struct {
 	CAFile     string
 	CertFile   string
@@ -77,6 +85,9 @@ func (c GRPCClientTLSConfig) Enabled() bool {
 func (c HTTPConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 func (c GRPCConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 func (c TokenServiceConfig) Address() string {
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+func (c TokenCreationServiceConfig) Address() string {
 	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
 
@@ -136,6 +147,7 @@ type LookupEnv func(string) (string, bool)
 // HTTP_HOST defaults to 0.0.0.0 and HTTP_PORT defaults to 38081.
 // GRPC_HOST defaults to 127.0.0.1 and GRPC_PORT defaults to 39090.
 // TOKEN_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_SERVICE_GRPC_PORT defaults to 39100.
+// TOKEN_CREATION_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_CREATION_SERVICE_GRPC_PORT defaults to 39200.
 // DATABASE_URL defaults to a local development PostgreSQL database.
 func Load(lookup LookupEnv) (Config, error) {
 	config := Config{
@@ -151,6 +163,10 @@ func Load(lookup LookupEnv) (Config, error) {
 		TokenService: TokenServiceConfig{
 			Host: defaultTokenServiceHost,
 			Port: defaultTokenServicePort,
+		},
+		TokenCreationService: TokenCreationServiceConfig{
+			Host: defaultTokenCreationServiceHost,
+			Port: defaultTokenCreationServicePort,
 		},
 		Database: DatabaseConfig{
 			URL: defaultDatabaseURL,
@@ -174,6 +190,9 @@ func Load(lookup LookupEnv) (Config, error) {
 	if host, ok := lookup("TOKEN_SERVICE_GRPC_HOST"); ok && host != "" {
 		config.TokenService.Host = host
 	}
+	if host, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_HOST"); ok && host != "" {
+		config.TokenCreationService.Host = host
+	}
 
 	if rawPort, ok := lookup("HTTP_PORT"); ok && rawPort != "" {
 		port, err := strconv.Atoi(rawPort)
@@ -195,6 +214,13 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("TOKEN_SERVICE_GRPC_PORT must be an integer from 1 to 65535")
 		}
 		config.TokenService.Port = port
+	}
+	if rawPort, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_PORT"); ok && rawPort != "" {
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return Config{}, fmt.Errorf("TOKEN_CREATION_SERVICE_GRPC_PORT must be an integer from 1 to 65535")
+		}
+		config.TokenCreationService.Port = port
 	}
 	if value, ok := lookup("TOKEN_SERVICE_GRPC_CA_FILE"); ok && value != "" {
 		config.TokenService.TLS.CAFile = value

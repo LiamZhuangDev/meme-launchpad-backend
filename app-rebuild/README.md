@@ -29,6 +29,9 @@ The original backend is not imported or modified by this project.
 - [x] Step 12.1 — standalone internal token-read gRPC service
 - [x] Step 12.2 — REST-to-gRPC token reader adapter
 - [x] Step 12.3 — switch REST token reads and remove duplicate ownership
+- [x] Step 13.1 — standalone internal token-creation gRPC service
+- [ ] Step 13.2 — REST-to-gRPC token-creation adapter
+- [ ] Step 13.3 — switch REST token creation and remove duplicate ownership
 
 ## Step 1: run the foundation
 
@@ -1056,3 +1059,67 @@ During the handshake, the API verifies that the token-service certificate is
 valid for `localhost`. The token service verifies that the API certificate was
 issued by the development CA and carries the allowed
 `spiffe://meme-launchpad/internal-client` identity.
+
+## Step 13.1: standalone token-creation gRPC service
+
+Token creation now has an independently runnable internal process:
+
+```text
+cmd/token-creation-service :39200
+  -> JWT bearer verification
+  -> TokenCreationService gRPC handler
+  -> tokencreation.Service
+  -> TokenCreationRepository
+  -> PostgreSQL
+```
+
+This first extraction checkpoint does not change the REST handler. The API
+still creates signed intents directly, and its existing `:39090` gRPC surface
+still includes token creation until the adapter and cutover checkpoints are
+complete.
+
+The listener defaults are:
+
+| Environment variable | Default |
+| --- | --- |
+| `TOKEN_CREATION_SERVICE_GRPC_HOST` | `127.0.0.1` |
+| `TOKEN_CREATION_SERVICE_GRPC_PORT` | `39200` |
+
+Apply `migrations/003_create_token_creation_requests.sql` and configure all
+five `TOKEN_CREATION_*` values documented in Step 6. The standalone service
+must also use the same `JWT_SECRET` as the REST API so that it can verify the
+API's bearer tokens:
+
+```bash
+JWT_SECRET='replace-with-the-same-secret-used-by-the-api' \
+TOKEN_CREATION_CHAIN_ID='97' \
+TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
+TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
+TOKEN_CREATION_SIGNER_KEY='your-signer-private-key' \
+TOKEN_CREATION_BYTECODE='0xYourCompiledTokenCreationBytecode' \
+go run ./cmd/token-creation-service
+```
+
+The process only registers health and
+`meme.tokencreation.v1.TokenCreationService`; it uses the auth component as a
+JWT parser without exposing the auth RPC service.
+
+To secure `:39200` with the development mTLS certificates, add the same server
+variables used by the token-read service:
+
+```bash
+GRPC_TLS_CERT_FILE=.local-certs/server.crt \
+GRPC_TLS_KEY_FILE=.local-certs/server.key \
+GRPC_TLS_CLIENT_CA_FILE=.local-certs/ca.crt \
+GRPC_ALLOWED_CLIENT_IDS='spiffe://meme-launchpad/internal-client' \
+JWT_SECRET='replace-with-the-same-secret-used-by-the-api' \
+TOKEN_CREATION_CHAIN_ID='97' \
+TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
+TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
+TOKEN_CREATION_SIGNER_KEY='your-signer-private-key' \
+TOKEN_CREATION_BYTECODE='0xYourCompiledTokenCreationBytecode' \
+go run ./cmd/token-creation-service
+```
+
+Step 13.2 will add a client adapter for the existing REST token-creation
+handler without cutting it over yet.
