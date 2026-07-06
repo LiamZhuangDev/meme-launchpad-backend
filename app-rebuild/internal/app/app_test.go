@@ -7,26 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/config"
 	"github.com/meme-launchpad/app-rebuild/internal/repository"
-	"github.com/meme-launchpad/app-rebuild/internal/tokencreation"
-	"github.com/meme-launchpad/app-rebuild/internal/upload"
 )
 
 type fakeTokenReader struct{}
-type fakeTokenCreator struct{}
-type fakeUploadService struct{}
-
-func (fakeTokenCreator) Create(context.Context, tokencreation.Request) (tokencreation.Response, error) {
-	return tokencreation.Response{}, nil
-}
-
-func (fakeUploadService) Presign(context.Context, string, string, int) (upload.PresignResult, error) {
-	return upload.PresignResult{}, nil
-}
-
-func (fakeUploadService) Confirm(context.Context) error { return nil }
 
 func (fakeTokenReader) List(context.Context, int, int) ([]repository.Token, error) {
 	return []repository.Token{{ID: 1, Symbol: "MEME"}}, nil
@@ -53,29 +38,6 @@ func TestHTTPServerUsesConfiguration(t *testing.T) {
 
 	if recorder.Body.String() != "{\"service\":\"test-api\",\"status\":\"ok\"}\n" {
 		t.Fatalf("body = %q", recorder.Body.String())
-	}
-}
-
-func TestGRPCServerIsConfigured(t *testing.T) {
-	application := NewWithPool(config.Config{ServiceName: "test-api"}, nil)
-	application.TokenReader = fakeTokenReader{}
-	application.TokenCreator = fakeTokenCreator{}
-	application.Uploads = fakeUploadService{}
-	application.Auth = auth.New(nil, "test-secret", auth.SIWEConfig{})
-	server := application.GRPCServer()
-	t.Cleanup(server.Stop)
-
-	if _, ok := server.GetServiceInfo()["grpc.health.v1.Health"]; !ok {
-		t.Fatal("standard gRPC health service is not registered")
-	}
-	if _, ok := server.GetServiceInfo()["meme.token.v1.TokenService"]; ok {
-		t.Fatal("API gRPC server must not own the extracted token service")
-	}
-	if _, ok := server.GetServiceInfo()["meme.tokencreation.v1.TokenCreationService"]; ok {
-		t.Fatal("API gRPC server must not own the extracted token-creation service")
-	}
-	if _, ok := server.GetServiceInfo()["meme.upload.v1.UploadService"]; ok {
-		t.Fatal("API gRPC server must not own the extracted upload service")
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"github.com/meme-launchpad/app-rebuild/internal/auth"
 	"github.com/meme-launchpad/app-rebuild/internal/config"
 	"github.com/meme-launchpad/app-rebuild/internal/database"
-	"github.com/meme-launchpad/app-rebuild/internal/grpcapi"
 	"github.com/meme-launchpad/app-rebuild/internal/grpcclient"
 	"github.com/meme-launchpad/app-rebuild/internal/grpcsecurity"
 	"github.com/meme-launchpad/app-rebuild/internal/httpapi"
@@ -107,14 +106,6 @@ func (a *Application) HTTPServer() *http.Server {
 		Handler:           httpapi.NewHandler(a.Config.ServiceName, a.Auth, a.TokenReader, a.TokenCreator, a.Uploads),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-}
-
-func (a *Application) GRPCServer(options ...grpc.ServerOption) *grpc.Server {
-	dependencies := grpcapi.Dependencies{}
-	if a.Auth != nil {
-		dependencies.Auth = a.Auth
-	}
-	return grpcapi.NewServer(a.Config.ServiceName, dependencies, options...)
 }
 
 func connectUploadService(ctx context.Context, cfg config.UploadServiceConfig) (*grpc.ClientConn, *grpcclient.UploadService, error) {

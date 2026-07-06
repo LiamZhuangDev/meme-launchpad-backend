@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	target := envOrDefault("INTERNAL_GRPC_TARGET", "127.0.0.1:39090")
+	target := envOrDefault("INTERNAL_GRPC_TARGET", "127.0.0.1:39100")
 	timeout := durationOrDefault("INTERNAL_GRPC_TIMEOUT", 5*time.Second)
 	page := int32OrDefault("TOKEN_PAGE", 1)
 	pageSize := int32OrDefault("TOKEN_PAGE_SIZE", 20)

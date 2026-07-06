@@ -17,14 +17,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.HTTP.Host != defaultHTTPHost {
 		t.Fatalf("HTTP.Host = %q, want %q", config.HTTP.Host, defaultHTTPHost)
 	}
-	if config.GRPC.Port != defaultGRPCPort {
-		t.Fatalf("GRPC.Port = %d, want %d", config.GRPC.Port, defaultGRPCPort)
-	}
-	if config.GRPC.Host != defaultGRPCHost {
-		t.Fatalf("GRPC.Host = %q, want %q", config.GRPC.Host, defaultGRPCHost)
-	}
-	if config.HTTP.Address() != "0.0.0.0:38081" || config.GRPC.Address() != "127.0.0.1:39090" {
-		t.Fatalf("addresses = %q and %q", config.HTTP.Address(), config.GRPC.Address())
+	if config.HTTP.Address() != "0.0.0.0:38081" {
+		t.Fatalf("HTTP address = %q", config.HTTP.Address())
 	}
 	if config.TokenService.Address() != "127.0.0.1:39100" {
 		t.Fatalf("TokenService.Address() = %q", config.TokenService.Address())
@@ -45,8 +39,6 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		"APP_NAME":                                "local-api",
 		"HTTP_HOST":                               "192.0.2.10",
 		"HTTP_PORT":                               "48080",
-		"GRPC_HOST":                               "10.0.0.10",
-		"GRPC_PORT":                               "49090",
 		"TOKEN_SERVICE_GRPC_HOST":                 "10.0.0.11",
 		"TOKEN_SERVICE_GRPC_PORT":                 "49100",
 		"TOKEN_CREATION_SERVICE_GRPC_HOST":        "10.0.0.12",
@@ -88,7 +80,7 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if config.ServiceName != "local-api" || config.HTTP.Address() != "192.0.2.10:48080" || config.GRPC.Address() != "10.0.0.10:49090" || config.Database.URL != "postgres://local/test" {
+	if config.ServiceName != "local-api" || config.HTTP.Address() != "192.0.2.10:48080" || config.Database.URL != "postgres://local/test" {
 		t.Fatalf("config = %+v, want local-api on 48080", config)
 	}
 	if config.TokenService.Address() != "10.0.0.11:49100" {
@@ -129,18 +121,6 @@ func TestLoadRejectsInvalidPort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want invalid port error")
-	}
-}
-
-func TestLoadRejectsInvalidGRPCPort(t *testing.T) {
-	_, err := Load(func(key string) (string, bool) {
-		if key == "GRPC_PORT" {
-			return "70000", true
-		}
-		return "", false
-	})
-	if err == nil {
-		t.Fatal("Load() error = nil, want invalid gRPC port error")
 	}
 }
 
@@ -245,18 +225,6 @@ func TestLoadRejectsPartialGRPCTLSConfig(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want partial gRPC TLS config error")
-	}
-}
-
-func TestLoadRejectsNonLoopbackPlaintextGRPC(t *testing.T) {
-	_, err := Load(func(key string) (string, bool) {
-		if key == "GRPC_HOST" {
-			return "0.0.0.0", true
-		}
-		return "", false
-	})
-	if err == nil {
-		t.Fatal("Load() error = nil, want TLS requirement for routable gRPC")
 	}
 }
 

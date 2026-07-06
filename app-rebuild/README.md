@@ -35,6 +35,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 14.1 — standalone internal upload gRPC service
 - [x] Step 14.2 — REST-to-gRPC upload adapter
 - [x] Step 14.3 — switch REST uploads and remove duplicate ownership
+- [x] Step 15 — remove the API-owned gRPC listener
 
 ## Step 1: run the foundation
 
@@ -440,6 +441,11 @@ curl 'http://localhost:38081/api/v1/file/token-logo-presign?mimeType=image/png&c
 
 ## Step 10.1: parallel gRPC foundation
 
+> Steps 10 and 11 document the earlier parallel-transport checkpoints. Step 15
+> removes the API-owned `:39090` listener after all internal capabilities move
+> to standalone services; those historical `:39090` commands no longer apply
+> to the final runtime.
+
 The API process now listens on two transport ports while sharing one
 application dependency container:
 
@@ -766,15 +772,15 @@ the generated `TokenServiceClient` through a small reusable wrapper in
 cmd/internal-client
   -> grpcclient.Client
   -> generated TokenServiceClient
-  -> internal gRPC listener :39090
+  -> standalone token service :39100
   -> grpcapi token handler
   -> TokenRepository
 ```
 
-Start the API first:
+Start the token service first:
 
 ```bash
-go run ./cmd/api
+go run ./cmd/token-service
 ```
 
 In another terminal, run the internal client:
@@ -789,7 +795,7 @@ with:
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
-| `INTERNAL_GRPC_TARGET` | `127.0.0.1:39090` | Internal API gRPC address |
+| `INTERNAL_GRPC_TARGET` | `127.0.0.1:39100` | Standalone token-service address |
 | `INTERNAL_GRPC_TIMEOUT` | `5s` | Overall connect and RPC deadline |
 | `TOKEN_PAGE` | `1` | Token page to request |
 | `TOKEN_PAGE_SIZE` | `20` | Tokens per page |
@@ -800,11 +806,11 @@ For example:
 TOKEN_PAGE=2 TOKEN_PAGE_SIZE=5 go run ./cmd/internal-client
 ```
 
-For container-to-container traffic, use the API's private DNS name together
+For container-to-container traffic, use the token service's private DNS name together
 with the Step 11.3 client certificate settings:
 
 ```bash
-INTERNAL_GRPC_TARGET=meme-api:39090 \
+INTERNAL_GRPC_TARGET=meme-token-service:39100 \
 INTERNAL_GRPC_CA_FILE=/certs/ca.crt \
 INTERNAL_GRPC_CERT_FILE=/certs/internal-client.crt \
 INTERNAL_GRPC_KEY_FILE=/certs/internal-client.key \
@@ -1415,3 +1421,29 @@ When all three standalone services use mTLS, combine this group with the
 token-read and token-creation client variables documented in Steps 12.3 and
 13.3. A non-loopback upload target is rejected without all four client TLS
 values.
+
+## Step 15: REST-only API process
+
+After token reads, token creation, and uploads were extracted, the API-owned
+gRPC listener contained only the parallel auth transport. The final cleanup
+removes that listener while leaving the REST auth implementation unchanged.
+
+The final process boundaries are:
+
+| Process | Listener | Responsibility |
+| --- | --- | --- |
+| `cmd/api` | REST `:38081` | Browser API and SIWE/JWT auth |
+| `cmd/token-service` | gRPC `:39100` | Token reads |
+| `cmd/token-creation-service` | gRPC `:39200` | Signed token-creation intents |
+| `cmd/upload-service` | gRPC `:39300` | COS presigning and confirmation acknowledgment |
+
+`Application.GRPCServer`, the API's gRPC startup/shutdown path, and the unused
+`GRPC_HOST`/`GRPC_PORT` settings are gone. `GRPC_TLS_*` remains the common
+server-side mTLS configuration used by each standalone service. The
+service-specific `*_SERVICE_GRPC_*` settings configure listener addresses and
+the API's outbound client identities.
+
+The `grpcapi` package is intentionally retained: its token, token-creation,
+and upload handlers receive requests inside the standalone gRPC processes.
+Auth code is also retained for REST and for JWT parsing in protected internal
+services, but auth is no longer exposed through an API-owned gRPC listener.

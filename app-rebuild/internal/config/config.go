@@ -16,8 +16,6 @@ const (
 	defaultServiceName              = "meme-launchpad-rebuild-api"
 	defaultHTTPHost                 = "0.0.0.0"
 	defaultHTTPPort                 = 38081
-	defaultGRPCHost                 = "127.0.0.1"
-	defaultGRPCPort                 = 39090
 	defaultTokenServiceHost         = "127.0.0.1"
 	defaultTokenServicePort         = 39100
 	defaultTokenCreationServiceHost = "127.0.0.1"
@@ -50,9 +48,7 @@ type HTTPConfig struct {
 }
 
 type GRPCConfig struct {
-	Host string
-	Port int
-	TLS  GRPCTLSConfig
+	TLS GRPCTLSConfig
 }
 
 type GRPCTLSConfig struct {
@@ -93,7 +89,6 @@ func (c GRPCClientTLSConfig) Enabled() bool {
 }
 
 func (c HTTPConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
-func (c GRPCConfig) Address() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
 func (c TokenServiceConfig) Address() string {
 	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
@@ -158,7 +153,6 @@ type LookupEnv func(string) (string, bool)
 //
 // APP_NAME defaults to meme-launchpad-rebuild-api.
 // HTTP_HOST defaults to 0.0.0.0 and HTTP_PORT defaults to 38081.
-// GRPC_HOST defaults to 127.0.0.1 and GRPC_PORT defaults to 39090.
 // TOKEN_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_SERVICE_GRPC_PORT defaults to 39100.
 // TOKEN_CREATION_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_CREATION_SERVICE_GRPC_PORT defaults to 39200.
 // UPLOAD_SERVICE_GRPC_HOST defaults to 127.0.0.1 and UPLOAD_SERVICE_GRPC_PORT defaults to 39300.
@@ -169,10 +163,6 @@ func Load(lookup LookupEnv) (Config, error) {
 		HTTP: HTTPConfig{
 			Host: defaultHTTPHost,
 			Port: defaultHTTPPort,
-		},
-		GRPC: GRPCConfig{
-			Host: defaultGRPCHost,
-			Port: defaultGRPCPort,
 		},
 		TokenService: TokenServiceConfig{
 			Host: defaultTokenServiceHost,
@@ -202,9 +192,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	if host, ok := lookup("HTTP_HOST"); ok && host != "" {
 		config.HTTP.Host = host
 	}
-	if host, ok := lookup("GRPC_HOST"); ok && host != "" {
-		config.GRPC.Host = host
-	}
 	if host, ok := lookup("TOKEN_SERVICE_GRPC_HOST"); ok && host != "" {
 		config.TokenService.Host = host
 	}
@@ -221,13 +208,6 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("HTTP_PORT must be an integer from 1 to 65535")
 		}
 		config.HTTP.Port = port
-	}
-	if rawPort, ok := lookup("GRPC_PORT"); ok && rawPort != "" {
-		port, err := strconv.Atoi(rawPort)
-		if err != nil || port < 1 || port > 65535 {
-			return Config{}, fmt.Errorf("GRPC_PORT must be an integer from 1 to 65535")
-		}
-		config.GRPC.Port = port
 	}
 	if rawPort, ok := lookup("TOKEN_SERVICE_GRPC_PORT"); ok && rawPort != "" {
 		port, err := strconv.Atoi(rawPort)
@@ -313,9 +293,6 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if err := config.UploadService.TLS.Validate("UPLOAD_SERVICE_GRPC"); err != nil {
 		return Config{}, err
-	}
-	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.GRPC.Host) {
-		return Config{}, fmt.Errorf("gRPC TLS is required when GRPC_HOST is not loopback")
 	}
 
 	if databaseURL, ok := lookup("DATABASE_URL"); ok && databaseURL != "" {
@@ -454,14 +431,6 @@ func (c GRPCTLSConfig) Validate() error {
 		return fmt.Errorf("GRPC_TLS_CERT_FILE, GRPC_TLS_KEY_FILE, GRPC_TLS_CLIENT_CA_FILE, and GRPC_ALLOWED_CLIENT_IDS must be set together")
 	}
 	return nil
-}
-
-func loopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 func (c Config) validateTokenCreation() error {
