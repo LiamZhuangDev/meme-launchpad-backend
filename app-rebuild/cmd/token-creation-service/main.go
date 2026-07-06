@@ -59,7 +59,11 @@ func main() {
 		log.Fatal("mutual TLS is required when TOKEN_CREATION_SERVICE_GRPC_HOST is not loopback")
 	}
 
-	tokenVerifier := auth.NewJWTVerifier(cfg.Auth.JWTSecret)
+	publicKey, err := auth.LoadJWTPublicKey(cfg.Auth.JWTPublicKeyFile)
+	if err != nil {
+		log.Fatalf("configure JWT verifier: %v", err)
+	}
+	tokenVerifier := auth.NewJWTVerifier(publicKey)
 	server := grpcapi.NewServer(serviceName, grpcapi.Dependencies{
 		TokenCreationAuth: tokenVerifier,
 		TokenCreation:     creator,

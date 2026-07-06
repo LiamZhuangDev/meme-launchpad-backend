@@ -32,6 +32,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.Database.URL != defaultDatabaseURL {
 		t.Fatalf("Database.URL = %q, want %q", config.Database.URL, defaultDatabaseURL)
 	}
+	if config.Auth.JWTPrivateKeyFile != defaultJWTPrivateKeyFile || config.Auth.JWTPublicKeyFile != defaultJWTPublicKeyFile {
+		t.Fatalf("JWT key files = %q and %q", config.Auth.JWTPrivateKeyFile, config.Auth.JWTPublicKeyFile)
+	}
 }
 
 func TestLoadReadsEnvironment(t *testing.T) {
@@ -62,6 +65,8 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		"GRPC_TLS_CLIENT_CA_FILE":                 "/certs/ca.crt",
 		"GRPC_ALLOWED_CLIENT_IDS":                 "spiffe://meme/client,worker",
 		"DATABASE_URL":                            "postgres://local/test",
+		"JWT_PRIVATE_KEY_FILE":                    "/keys/private.pem",
+		"JWT_PUBLIC_KEY_FILE":                     "/keys/public.pem",
 		"REDIS_ADDR":                              "localhost:6379",
 		"REDIS_PASSWORD":                          "secret",
 		"REDIS_DB":                                "2",
@@ -106,6 +111,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if config.COS.SecretID != "cos-id" || config.COS.Domain != "https://cdn.example" {
 		t.Fatalf("cos config = %+v", config.COS)
+	}
+	if config.Auth.JWTPrivateKeyFile != "/keys/private.pem" || config.Auth.JWTPublicKeyFile != "/keys/public.pem" {
+		t.Fatalf("auth config = %+v", config.Auth)
 	}
 	if !config.GRPC.TLS.Enabled() || len(config.GRPC.TLS.AllowedClientIDs) != 2 {
 		t.Fatalf("gRPC TLS config = %+v", config.GRPC.TLS)

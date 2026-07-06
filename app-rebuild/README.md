@@ -37,6 +37,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 14.3 — switch REST uploads and remove duplicate ownership
 - [x] Step 15 — remove the API-owned gRPC listener
 - [x] Step 16 — separate JWT verification from the SIWE auth service
+- [x] Step 17 — asymmetric Ed25519 JWT signing and verification
 
 ## Step 1: run the foundation
 
@@ -167,7 +168,13 @@ for your deployment:
 | `SIWE_URI` | `http://localhost:38081` |
 | `SIWE_CHAIN_ID` | `97` |
 
-Set `JWT_SECRET` outside local development. By default, local development still
+Generate the local Ed25519 JWT keypair before starting the API:
+
+```bash
+./scripts/generate-dev-jwt-keys.sh
+```
+
+The API defaults to `.local-jwt/private.pem`. By default, local development still
 uses an in-memory challenge store. Step 9 adds an optional Redis-backed store
 so authentication works across multiple API processes.
 This checkpoint verifies externally owned accounts (EOAs); contract-wallet
@@ -1099,11 +1106,11 @@ The listener defaults are:
 
 Apply `migrations/003_create_token_creation_requests.sql` and configure all
 five `TOKEN_CREATION_*` values documented in Step 6. The standalone service
-must also use the same `JWT_SECRET` as the REST API so that it can verify the
-API's bearer tokens:
+must receive the public verification key corresponding to the API's private
+signing key:
 
 ```bash
-JWT_SECRET='replace-with-the-same-secret-used-by-the-api' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 TOKEN_CREATION_CHAIN_ID='97' \
 TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
 TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
@@ -1124,7 +1131,7 @@ GRPC_TLS_CERT_FILE=.local-certs/server.crt \
 GRPC_TLS_KEY_FILE=.local-certs/server.key \
 GRPC_TLS_CLIENT_CA_FILE=.local-certs/ca.crt \
 GRPC_ALLOWED_CLIENT_IDS='spiffe://meme-launchpad/internal-client' \
-JWT_SECRET='replace-with-the-same-secret-used-by-the-api' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 TOKEN_CREATION_CHAIN_ID='97' \
 TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
 TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
@@ -1152,7 +1159,7 @@ REST TokenCreator interface
 Token creation is authenticated at both boundaries. After REST validates the
 browser JWT, it places that raw token in the request context. The adapter sends
 it as outgoing `authorization: Bearer <JWT>` gRPC metadata, and the standalone
-handler validates it again using the shared `JWT_SECRET`. The Protobuf request
+handler validates it again using the JWT public key. The Protobuf request
 does not contain a creator address; the internal handler derives the creator
 from the verified JWT to prevent caller impersonation.
 
@@ -1198,7 +1205,7 @@ docker start meme-launchpad-postgres
 go run ./cmd/token-service
 
 # Terminal 3: token creation; include the Step 13.1 JWT and contract variables
-JWT_SECRET='shared-secret' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 TOKEN_CREATION_CHAIN_ID='97' \
 TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
 TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
@@ -1206,8 +1213,8 @@ TOKEN_CREATION_SIGNER_KEY='your-signer-private-key' \
 TOKEN_CREATION_BYTECODE='0xYourCompiledTokenCreationBytecode' \
 go run ./cmd/token-creation-service
 
-# Terminal 4: public REST API; JWT_SECRET must match Terminal 3
-JWT_SECRET='shared-secret' go run ./cmd/api
+# Terminal 4: public REST API owns the private signing key
+JWT_PRIVATE_KEY_FILE='.local-jwt/private.pem' go run ./cmd/api
 ```
 
 The API verifies both internal health identities during startup:
@@ -1231,7 +1238,7 @@ these variables:
 The development certificates can be reused for both outbound connections:
 
 ```bash
-JWT_SECRET='shared-secret' \
+JWT_PRIVATE_KEY_FILE='.local-jwt/private.pem' \
 TOKEN_SERVICE_GRPC_CA_FILE=.local-certs/ca.crt \
 TOKEN_SERVICE_GRPC_CERT_FILE=.local-certs/internal-client.crt \
 TOKEN_SERVICE_GRPC_KEY_FILE=.local-certs/internal-client.key \
@@ -1269,11 +1276,11 @@ The standalone listener defaults are:
 | `UPLOAD_SERVICE_GRPC_HOST` | `127.0.0.1` |
 | `UPLOAD_SERVICE_GRPC_PORT` | `39300` |
 
-The process does not need PostgreSQL or Redis. It requires the same
-`JWT_SECRET` as the API plus the COS configuration documented in Step 9:
+The process does not need PostgreSQL or Redis. It requires the JWT public key
+plus the COS configuration documented in Step 9:
 
 ```bash
-JWT_SECRET='shared-secret' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 COS_SECRET_ID='replace-me' \
 COS_SECRET_KEY='replace-me' \
 COS_BUCKET='your-bucket' \
@@ -1294,7 +1301,7 @@ GRPC_TLS_CERT_FILE=.local-certs/server.crt \
 GRPC_TLS_KEY_FILE=.local-certs/server.key \
 GRPC_TLS_CLIENT_CA_FILE=.local-certs/ca.crt \
 GRPC_ALLOWED_CLIENT_IDS='spiffe://meme-launchpad/internal-client' \
-JWT_SECRET='shared-secret' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 COS_SECRET_ID='replace-me' \
 COS_SECRET_KEY='replace-me' \
 COS_BUCKET='your-bucket' \
@@ -1370,7 +1377,7 @@ docker start meme-launchpad-postgres
 go run ./cmd/token-service
 
 # Terminal 3: include all Step 13.1 contract variables
-JWT_SECRET='shared-secret' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 TOKEN_CREATION_CHAIN_ID='97' \
 TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
 TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
@@ -1379,15 +1386,15 @@ TOKEN_CREATION_BYTECODE='0xYourCompiledTokenCreationBytecode' \
 go run ./cmd/token-creation-service
 
 # Terminal 4
-JWT_SECRET='shared-secret' \
+JWT_PUBLIC_KEY_FILE='.local-jwt/public.pem' \
 COS_SECRET_ID='replace-me' \
 COS_SECRET_KEY='replace-me' \
 COS_BUCKET='your-bucket' \
 COS_REGION='ap-guangzhou' \
 go run ./cmd/upload-service
 
-# Terminal 5: JWT_SECRET matches the protected internal services
-JWT_SECRET='shared-secret' go run ./cmd/api
+# Terminal 5: only the API receives the private signing key
+JWT_PRIVATE_KEY_FILE='.local-jwt/private.pem' go run ./cmd/api
 ```
 
 The three internal health identities are:
@@ -1410,7 +1417,7 @@ For mTLS, configure the API's upload-service client role separately:
 Development example:
 
 ```bash
-JWT_SECRET='shared-secret' \
+JWT_PRIVATE_KEY_FILE='.local-jwt/private.pem' \
 UPLOAD_SERVICE_GRPC_CA_FILE=.local-certs/ca.crt \
 UPLOAD_SERVICE_GRPC_CERT_FILE=.local-certs/internal-client.crt \
 UPLOAD_SERVICE_GRPC_KEY_FILE=.local-certs/internal-client.key \
@@ -1455,7 +1462,8 @@ Protected standalone services no longer construct a partially initialized
 `auth.Service` with a nil user repository. They use the narrower component:
 
 ```go
-tokenVerifier := auth.NewJWTVerifier(cfg.Auth.JWTSecret)
+publicKey, _ := auth.LoadJWTPublicKey(cfg.Auth.JWTPublicKeyFile)
+tokenVerifier := auth.NewJWTVerifier(publicKey)
 ```
 
 `JWTVerifier` implements only `ParseToken`. It has no SIWE configuration,
@@ -1473,6 +1481,48 @@ token-creation/upload services
   -> JWTVerifier.ParseToken only
 ```
 
-This checkpoint preserves the existing shared HS256 `JWT_SECRET`. A future
-security step can replace it with asymmetric signing so only the auth API holds
-the private signing key and internal services receive verification keys.
+Step 17 replaces the former shared HS256 secret with asymmetric keys.
+
+## Step 17: asymmetric Ed25519 JWTs
+
+JWT authority is now split by cryptographic capability:
+
+```text
+cmd/api
+  -> JWT_PRIVATE_KEY_FILE
+  -> EdDSA signs JWTs
+
+cmd/token-creation-service and cmd/upload-service
+  -> JWT_PUBLIC_KEY_FILE
+  -> verify JWTs only
+```
+
+Generate development keys once:
+
+```bash
+./scripts/generate-dev-jwt-keys.sh
+```
+
+This writes an Ed25519 PKCS#8 private key and PKIX public key:
+
+```text
+.local-jwt/private.pem  # API only; never distribute to internal services
+.local-jwt/public.pem   # safe to distribute to JWT-verifying services
+```
+
+The default paths already point there. Production deployments should mount
+the private key only into `cmd/api` and mount the public key into token-creation
+and upload services. Override paths when needed:
+
+```bash
+# REST auth API
+JWT_PRIVATE_KEY_FILE=/run/secrets/jwt-private.pem go run ./cmd/api
+
+# Protected internal services
+JWT_PUBLIC_KEY_FILE=/run/config/jwt-public.pem go run ./cmd/token-creation-service
+JWT_PUBLIC_KEY_FILE=/run/config/jwt-public.pem go run ./cmd/upload-service
+```
+
+Tokens now use EdDSA. Possession of the public key permits validation but
+cannot produce a valid signature, so a compromised internal service can no
+longer mint authentication tokens.

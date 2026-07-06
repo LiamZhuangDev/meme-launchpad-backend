@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"testing"
 
@@ -25,9 +26,9 @@ func (f *fakeTokenCreator) Create(_ context.Context, request tokencreation.Reque
 }
 
 func TestTokenCreationUsesAuthenticatedWallet(t *testing.T) {
-	const secret = "test-secret"
+	privateKey := testJWTKey(t)
 	address := "0x3333333333333333333333333333333333333333"
-	authenticator := auth.NewJWTVerifier(secret)
+	authenticator := auth.NewJWTVerifier(privateKey.Public().(ed25519.PublicKey))
 	creator := &fakeTokenCreator{response: tokencreation.Response{
 		Data: "0xdata", Signature: "0xsignature", RequestID: "0xrequest",
 		Salt: "0xsalt", PredictedAddress: "0x4444444444444444444444444444444444444444",
@@ -36,7 +37,7 @@ func TestTokenCreationUsesAuthenticatedWallet(t *testing.T) {
 	connection := testConnection(t, Dependencies{TokenCreationAuth: authenticator, TokenCreation: creator})
 	client := tokencreationv1.NewTokenCreationServiceClient(connection)
 
-	response, err := client.CreateToken(authenticatedContext(t, secret, address, 7), &tokencreationv1.CreateTokenRequest{
+	response, err := client.CreateToken(authenticatedContext(t, privateKey, address, 7), &tokencreationv1.CreateTokenRequest{
 		Name: "Meme", Symbol: "MEME", LaunchTime: 123, InitialBuyPercentage: 1000,
 	})
 	if err != nil {
@@ -51,8 +52,8 @@ func TestTokenCreationUsesAuthenticatedWallet(t *testing.T) {
 }
 
 func TestTokenCreationRequiresAuthenticationAndMapsValidationErrors(t *testing.T) {
-	const secret = "test-secret"
-	authenticator := auth.NewJWTVerifier(secret)
+	privateKey := testJWTKey(t)
+	authenticator := auth.NewJWTVerifier(privateKey.Public().(ed25519.PublicKey))
 	creator := &fakeTokenCreator{err: errors.New("name, symbol, and creator are required")}
 	connection := testConnection(t, Dependencies{TokenCreationAuth: authenticator, TokenCreation: creator})
 	client := tokencreationv1.NewTokenCreationServiceClient(connection)
@@ -61,7 +62,7 @@ func TestTokenCreationRequiresAuthenticationAndMapsValidationErrors(t *testing.T
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated code = %s", status.Code(err))
 	}
-	ctx := authenticatedContext(t, secret, "0x3333333333333333333333333333333333333333", 7)
+	ctx := authenticatedContext(t, privateKey, "0x3333333333333333333333333333333333333333", 7)
 	_, err = client.CreateToken(ctx, &tokencreationv1.CreateTokenRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("validation code = %s", status.Code(err))

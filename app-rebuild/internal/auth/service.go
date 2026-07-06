@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -82,22 +83,23 @@ func (c SIWEChallenge) Message() string {
 }
 
 type Service struct {
-	users    UserStore
-	secret   []byte
-	verifier *JWTVerifier
-	siwe     SIWEConfig
-	store    ChallengeStore
+	users      UserStore
+	privateKey ed25519.PrivateKey
+	verifier   *JWTVerifier
+	siwe       SIWEConfig
+	store      ChallengeStore
 }
 
-func New(users UserStore, jwtSecret string, siwe SIWEConfig) *Service {
-	return NewWithChallengeStore(users, jwtSecret, siwe, NewMemoryChallengeStore())
+func New(users UserStore, privateKey ed25519.PrivateKey, siwe SIWEConfig) *Service {
+	return NewWithChallengeStore(users, privateKey, siwe, NewMemoryChallengeStore())
 }
 
-func NewWithChallengeStore(users UserStore, jwtSecret string, siwe SIWEConfig, store ChallengeStore) *Service {
+func NewWithChallengeStore(users UserStore, privateKey ed25519.PrivateKey, siwe SIWEConfig, store ChallengeStore) *Service {
 	if store == nil {
 		store = NewMemoryChallengeStore()
 	}
-	return &Service{users: users, secret: []byte(jwtSecret), verifier: NewJWTVerifier(jwtSecret), siwe: siwe, store: store}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	return &Service{users: users, privateKey: privateKey, verifier: NewJWTVerifier(publicKey), siwe: siwe, store: store}
 }
 
 func (s *Service) RequestMessage(ctx context.Context, address string) (SignMessage, error) {
@@ -174,7 +176,7 @@ func (s *Service) consumeNonce(ctx context.Context, address string) error {
 func (s *Service) issueToken(user repository.User) (string, int64, error) {
 	expires := time.Now().Add(24 * time.Hour)
 	claims := Claims{UserID: user.ID, Address: user.Address, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(expires), IssuedAt: jwt.NewNumericDate(time.Now())}}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.secret)
+	token, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims).SignedString(s.privateKey)
 	return token, expires.Unix(), err
 }
 

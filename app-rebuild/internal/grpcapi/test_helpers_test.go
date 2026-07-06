@@ -2,6 +2,8 @@ package grpcapi
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"net"
 	"testing"
 
@@ -33,17 +35,26 @@ func testConnection(t *testing.T, dependencies Dependencies) *grpc.ClientConn {
 	return connection
 }
 
-func authenticatedContext(t *testing.T, secret, address string, userID int64) context.Context {
+func authenticatedContext(t *testing.T, privateKey ed25519.PrivateKey, address string, userID int64) context.Context {
 	t.Helper()
-	token := signedTestToken(t, secret, address, userID)
+	token := signedTestToken(t, privateKey, address, userID)
 	return metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+token)
 }
 
-func signedTestToken(t *testing.T, secret, address string, userID int64) string {
+func signedTestToken(t *testing.T, privateKey ed25519.PrivateKey, address string, userID int64) string {
 	t.Helper()
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{UserID: userID, Address: address}).SignedString([]byte(secret))
+	token, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, auth.Claims{UserID: userID, Address: address}).SignedString(privateKey)
 	if err != nil {
 		t.Fatalf("sign test JWT: %v", err)
 	}
 	return token
+}
+
+func testJWTKey(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate test JWT key: %v", err)
+	}
+	return privateKey
 }

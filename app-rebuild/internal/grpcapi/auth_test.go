@@ -35,7 +35,7 @@ func TestAuthServiceCompletesWalletLoginAndReadsMetadata(t *testing.T) {
 		t.Fatalf("GenerateKey() error = %v", err)
 	}
 	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
-	authenticator := auth.New(&fakeAuthUsers{}, "test-secret", auth.SIWEConfig{
+	authenticator := auth.New(&fakeAuthUsers{}, testJWTKey(t), auth.SIWEConfig{
 		Domain: "app.example", URI: "https://app.example/login", ChainID: 97,
 	})
 	client := authClient(t, authenticator)
@@ -79,7 +79,7 @@ func TestAuthServiceCompletesWalletLoginAndReadsMetadata(t *testing.T) {
 }
 
 func TestAuthServiceMapsInvalidInputAndMissingToken(t *testing.T) {
-	authenticator := auth.New(&fakeAuthUsers{}, "test-secret", auth.SIWEConfig{})
+	authenticator := auth.New(&fakeAuthUsers{}, testJWTKey(t), auth.SIWEConfig{})
 	client := authClient(t, authenticator)
 
 	_, err := client.RequestSignMessage(context.Background(), &authv1.RequestSignMessageRequest{Address: "not-an-address"})

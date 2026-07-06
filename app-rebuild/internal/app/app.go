@@ -41,6 +41,16 @@ func New(ctx context.Context, cfg config.Config) (*Application, error) {
 		return nil, err
 	}
 	application := NewWithPool(cfg, pool)
+	privateKey, err := auth.LoadJWTPrivateKey(cfg.Auth.JWTPrivateKeyFile)
+	if err != nil {
+		application.Close()
+		return nil, fmt.Errorf("configure JWT issuer: %w", err)
+	}
+	challengeStore := auth.ChallengeStore(auth.NewMemoryChallengeStore())
+	if application.Redis != nil {
+		challengeStore = auth.NewRedisChallengeStore(application.Redis, "")
+	}
+	application.Auth = auth.NewWithChallengeStore(application.Users, privateKey, auth.SIWEConfig(cfg.Auth.SIWE), challengeStore)
 	connection, reader, err := connectTokenService(ctx, cfg.TokenService)
 	if err != nil {
 		application.Close()
@@ -73,11 +83,6 @@ func NewWithPool(cfg config.Config, pool *pgxpool.Pool) *Application {
 	}
 	if pool != nil {
 		application.Users = repository.NewUserRepository(pool)
-		challengeStore := auth.ChallengeStore(auth.NewMemoryChallengeStore())
-		if application.Redis != nil {
-			challengeStore = auth.NewRedisChallengeStore(application.Redis, "")
-		}
-		application.Auth = auth.NewWithChallengeStore(application.Users, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE), challengeStore)
 	}
 	return application
 }

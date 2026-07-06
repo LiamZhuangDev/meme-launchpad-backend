@@ -45,10 +45,10 @@ func TestTransportParityTokenListUsesSamePagination(t *testing.T) {
 }
 
 func TestTransportParityResolvesSameJWTIdentity(t *testing.T) {
-	const secret = "test-secret"
 	const address = "0x3333333333333333333333333333333333333333"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
-	token := signedTestToken(t, secret, address, 7)
+	privateKey := testJWTKey(t)
+	authenticator := auth.New(nil, privateKey, auth.SIWEConfig{})
+	token := signedTestToken(t, privateKey, address, 7)
 
 	httpRequest := httptest.NewRequest(http.MethodGet, "/api/v1/user/me", nil)
 	httpRequest.Header.Set("Authorization", "Bearer "+token)
@@ -66,7 +66,7 @@ func TestTransportParityResolvesSameJWTIdentity(t *testing.T) {
 	}
 
 	client := authv1.NewAuthServiceClient(testConnection(t, Dependencies{Auth: authenticator}))
-	grpcUser, err := client.GetCurrentUser(authenticatedContext(t, secret, address, 7), &authv1.GetCurrentUserRequest{})
+	grpcUser, err := client.GetCurrentUser(authenticatedContext(t, privateKey, address, 7), &authv1.GetCurrentUserRequest{})
 	if err != nil {
 		t.Fatalf("gRPC GetCurrentUser() error = %v", err)
 	}
@@ -85,9 +85,9 @@ func (s *parityCreationStore) Create(_ context.Context, request repository.Token
 }
 
 func TestTransportParityTokenCreationBindsSameWallet(t *testing.T) {
-	const secret = "test-secret"
 	const address = "0x3333333333333333333333333333333333333333"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
+	privateKey := testJWTKey(t)
+	authenticator := auth.New(nil, privateKey, auth.SIWEConfig{})
 	store := &parityCreationStore{}
 	key, err := ethcrypto.HexToECDSA("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 	if err != nil {
@@ -103,7 +103,7 @@ func TestTransportParityTokenCreationBindsSameWallet(t *testing.T) {
 	}
 
 	httpRequest := httptest.NewRequest(http.MethodPost, "/api/v1/token/create", strings.NewReader(`{"name":"Meme","symbol":"MEME","initialBuyPercentage":1000}`))
-	httpRequest.Header.Set("Authorization", "Bearer "+signedTestToken(t, secret, address, 7))
+	httpRequest.Header.Set("Authorization", "Bearer "+signedTestToken(t, privateKey, address, 7))
 	httpResponse := httptest.NewRecorder()
 	httpapi.NewHandler("test", authenticator, nil, creator, nil).ServeHTTP(httpResponse, httpRequest)
 	if httpResponse.Code != http.StatusOK {
@@ -111,7 +111,7 @@ func TestTransportParityTokenCreationBindsSameWallet(t *testing.T) {
 	}
 
 	client := tokencreationv1.NewTokenCreationServiceClient(testConnection(t, Dependencies{Auth: authenticator, TokenCreation: creator}))
-	_, err = client.CreateToken(authenticatedContext(t, secret, address, 7), &tokencreationv1.CreateTokenRequest{
+	_, err = client.CreateToken(authenticatedContext(t, privateKey, address, 7), &tokencreationv1.CreateTokenRequest{
 		Name: "Meme", Symbol: "MEME", InitialBuyPercentage: 1000,
 	})
 	if err != nil {
@@ -123,13 +123,13 @@ func TestTransportParityTokenCreationBindsSameWallet(t *testing.T) {
 }
 
 func TestTransportParityUploadUsesSameStorageArguments(t *testing.T) {
-	const secret = "test-secret"
 	const address = "0x3333333333333333333333333333333333333333"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
+	privateKey := testJWTKey(t)
+	authenticator := auth.New(nil, privateKey, auth.SIWEConfig{})
 	uploads := &fakeUploadPresigner{}
 
 	httpRequest := httptest.NewRequest(http.MethodGet, "/api/v1/file/token-logo-presign?mimeType=image/webp&chainId=56", nil)
-	httpRequest.Header.Set("Authorization", "Bearer "+signedTestToken(t, secret, address, 7))
+	httpRequest.Header.Set("Authorization", "Bearer "+signedTestToken(t, privateKey, address, 7))
 	httpResponse := httptest.NewRecorder()
 	httpapi.NewHandler("test", authenticator, nil, nil, uploads).ServeHTTP(httpResponse, httpRequest)
 	if httpResponse.Code != http.StatusOK {
@@ -139,7 +139,7 @@ func TestTransportParityUploadUsesSameStorageArguments(t *testing.T) {
 
 	client := uploadv1.NewUploadServiceClient(testConnection(t, Dependencies{Auth: authenticator, Uploads: uploads}))
 	chainID := int32(56)
-	_, err := client.PresignImage(authenticatedContext(t, secret, address, 7), &uploadv1.PresignImageRequest{
+	_, err := client.PresignImage(authenticatedContext(t, privateKey, address, 7), &uploadv1.PresignImageRequest{
 		Kind: uploadv1.ImageKind_IMAGE_KIND_TOKEN_LOGO, MimeType: "image/webp", ChainId: &chainID,
 	})
 	if err != nil {

@@ -23,6 +23,8 @@ const (
 	defaultUploadServiceHost        = "127.0.0.1"
 	defaultUploadServicePort        = 39300
 	defaultDatabaseURL              = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
+	defaultJWTPrivateKeyFile        = ".local-jwt/private.pem"
+	defaultJWTPublicKeyFile         = ".local-jwt/public.pem"
 )
 
 // Config contains the process configuration shared by the API and indexer
@@ -110,8 +112,9 @@ type RedisConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret string
-	SIWE      SIWEConfig
+	JWTPrivateKeyFile string
+	JWTPublicKeyFile  string
+	SIWE              SIWEConfig
 }
 
 type SIWEConfig struct {
@@ -180,8 +183,9 @@ func Load(lookup LookupEnv) (Config, error) {
 			URL: defaultDatabaseURL,
 		},
 		Auth: AuthConfig{
-			JWTSecret: "development-only-secret-change-me",
-			SIWE:      SIWEConfig{Domain: "localhost:38081", URI: "http://localhost:38081", ChainID: 97},
+			JWTPrivateKeyFile: defaultJWTPrivateKeyFile,
+			JWTPublicKeyFile:  defaultJWTPublicKeyFile,
+			SIWE:              SIWEConfig{Domain: "localhost:38081", URI: "http://localhost:38081", ChainID: 97},
 		},
 		Indexer: IndexerConfig{BlockBatchSize: 500, PollInterval: 5},
 	}
@@ -311,8 +315,11 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 		config.Redis.DB = db
 	}
-	if secret, ok := lookup("JWT_SECRET"); ok && secret != "" {
-		config.Auth.JWTSecret = secret
+	if path, ok := lookup("JWT_PRIVATE_KEY_FILE"); ok && path != "" {
+		config.Auth.JWTPrivateKeyFile = path
+	}
+	if path, ok := lookup("JWT_PUBLIC_KEY_FILE"); ok && path != "" {
+		config.Auth.JWTPublicKeyFile = path
 	}
 	if domain, ok := lookup("SIWE_DOMAIN"); ok && domain != "" {
 		config.Auth.SIWE.Domain = domain

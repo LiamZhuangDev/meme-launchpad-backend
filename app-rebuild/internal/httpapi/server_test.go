@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -116,12 +118,8 @@ func TestCreateTokenUsesAuthenticatedWalletAsCreator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
 	address := "0x3333333333333333333333333333333333333333"
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: address}).SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	authService, token := testAuth(t, address)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/token/create", strings.NewReader(`{"name":"Meme","symbol":"MEME","initialBuyPercentage":1000}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
@@ -145,12 +143,9 @@ func TestCreateTokenUsesAuthenticatedWalletAsCreator(t *testing.T) {
 }
 
 func TestCreateTokenCarriesBearerTokenToCreator(t *testing.T) {
-	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
 	creator := &fakeTokenCreator{}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: "0x3333333333333333333333333333333333333333"}).SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	tokenAddress := "0x3333333333333333333333333333333333333333"
+	authService, token := testAuth(t, tokenAddress)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/token/create", strings.NewReader(`{"name":"Meme","symbol":"MEME"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
@@ -166,12 +161,8 @@ func TestCreateTokenCarriesBearerTokenToCreator(t *testing.T) {
 }
 
 func TestPresignImageRequiresAuthAndUsesFolder(t *testing.T) {
-	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
 	presigner := &fakePresigner{}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: "0x3333333333333333333333333333333333333333"}).SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	authService, token := testAuth(t, "0x3333333333333333333333333333333333333333")
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/file/token-logo-presign?mimeType=image/webp&chainId=56", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
@@ -193,12 +184,8 @@ func TestPresignImageRequiresAuthAndUsesFolder(t *testing.T) {
 }
 
 func TestUploadConfirmCarriesBearerTokenToService(t *testing.T) {
-	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
 	uploads := &fakePresigner{}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: "0x3333333333333333333333333333333333333333"}).SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	authService, token := testAuth(t, "0x3333333333333333333333333333333333333333")
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/file/upload-confirm", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
@@ -216,4 +203,18 @@ func newCreationService(key *ecdsa.PrivateKey, store *fakeCreationStore) (*token
 		Factory:               common.HexToAddress("0x2222222222222222222222222222222222222222"),
 		TokenCreationBytecode: []byte{1, 2, 3}, Signer: key,
 	}, store)
+}
+
+func testAuth(t *testing.T, address string) (*auth.Service, string) {
+	t.Helper()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := auth.New(nil, privateKey, auth.SIWEConfig{})
+	token, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, auth.Claims{Address: address}).SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, token
 }

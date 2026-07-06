@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"net"
 	"testing"
 
@@ -43,9 +44,10 @@ func TestHealthCheckReportsServing(t *testing.T) {
 }
 
 func TestServerRegistersEveryParallelApplicationService(t *testing.T) {
+	privateKey := testJWTKey(t)
 	server := NewServer("test-api", Dependencies{
 		Tokens:        &fakeTokenReader{},
-		Auth:          auth.New(nil, "test-secret", auth.SIWEConfig{}),
+		Auth:          auth.New(nil, privateKey, auth.SIWEConfig{}),
 		TokenCreation: &fakeTokenCreator{},
 		Uploads:       &fakeUploadPresigner{},
 	})
@@ -66,7 +68,8 @@ func TestServerRegistersEveryParallelApplicationService(t *testing.T) {
 }
 
 func TestServerCanExposeTokenCreationWithoutAuthRPCs(t *testing.T) {
-	parser := auth.NewJWTVerifier("test-secret")
+	privateKey := testJWTKey(t)
+	parser := auth.NewJWTVerifier(privateKey.Public().(ed25519.PublicKey))
 	server := NewServer("token-creation-service", Dependencies{
 		TokenCreationAuth: parser,
 		TokenCreation:     &fakeTokenCreator{},
@@ -83,7 +86,8 @@ func TestServerCanExposeTokenCreationWithoutAuthRPCs(t *testing.T) {
 }
 
 func TestServerCanExposeUploadWithoutAuthRPCs(t *testing.T) {
-	parser := auth.NewJWTVerifier("test-secret")
+	privateKey := testJWTKey(t)
+	parser := auth.NewJWTVerifier(privateKey.Public().(ed25519.PublicKey))
 	server := NewServer("upload-service", Dependencies{
 		UploadAuth: parser,
 		Uploads:    &fakeUploadPresigner{},

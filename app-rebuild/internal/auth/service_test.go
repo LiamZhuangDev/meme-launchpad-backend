@@ -29,7 +29,7 @@ func TestLoginVerifiesWalletSignatureAndConsumesNonce(t *testing.T) {
 		t.Fatalf("GenerateKey() error = %v", err)
 	}
 	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
-	service := New(&fakeUsers{}, "test-secret", SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
+	service := New(&fakeUsers{}, testJWTPrivateKey(t), SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
 
 	challenge, err := service.RequestMessage(context.Background(), address)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestLoginRejectsChallengeWithUnexpectedChainID(t *testing.T) {
 		t.Fatalf("GenerateKey() error = %v", err)
 	}
 	address := ethcrypto.PubkeyToAddress(key.PublicKey).Hex()
-	service := New(&fakeUsers{}, "test-secret", SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
+	service := New(&fakeUsers{}, testJWTPrivateKey(t), SIWEConfig{Domain: "app.example", URI: "https://app.example/login", ChainID: 97})
 	challenge, err := service.RequestMessage(context.Background(), address)
 	if err != nil {
 		t.Fatalf("RequestMessage() error = %v", err)

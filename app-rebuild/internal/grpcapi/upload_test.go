@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"testing"
 
 	uploadv1 "github.com/meme-launchpad/app-rebuild/gen/upload/v1"
@@ -28,8 +29,8 @@ func (f *fakeUploadPresigner) Presign(_ context.Context, folder, mimeType string
 func (f *fakeUploadPresigner) Confirm(context.Context) error { return nil }
 
 func TestUploadPresignMapsImageKindAndRequiresAuthentication(t *testing.T) {
-	const secret = "test-secret"
-	authenticator := auth.NewJWTVerifier(secret)
+	privateKey := testJWTKey(t)
+	authenticator := auth.NewJWTVerifier(privateKey.Public().(ed25519.PublicKey))
 	uploads := &fakeUploadPresigner{}
 	connection := testConnection(t, Dependencies{UploadAuth: authenticator, Uploads: uploads})
 	client := uploadv1.NewUploadServiceClient(connection)
@@ -42,7 +43,7 @@ func TestUploadPresignMapsImageKindAndRequiresAuthentication(t *testing.T) {
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated code = %s", status.Code(err))
 	}
-	ctx := authenticatedContext(t, secret, "0x3333333333333333333333333333333333333333", 7)
+	ctx := authenticatedContext(t, privateKey, "0x3333333333333333333333333333333333333333", 7)
 	response, err := client.PresignImage(ctx, request)
 	if err != nil {
 		t.Fatalf("PresignImage() error = %v", err)
@@ -56,11 +57,11 @@ func TestUploadPresignMapsImageKindAndRequiresAuthentication(t *testing.T) {
 }
 
 func TestUploadConfirmIsAuthenticatedPlaceholder(t *testing.T) {
-	const secret = "test-secret"
-	authenticator := auth.NewJWTVerifier(secret)
+	privateKey := testJWTKey(t)
+	authenticator := auth.NewJWTVerifier(privateKey.Public().(ed25519.PublicKey))
 	connection := testConnection(t, Dependencies{UploadAuth: authenticator, Uploads: &fakeUploadPresigner{}})
 	client := uploadv1.NewUploadServiceClient(connection)
-	ctx := authenticatedContext(t, secret, "0x3333333333333333333333333333333333333333", 7)
+	ctx := authenticatedContext(t, privateKey, "0x3333333333333333333333333333333333333333", 7)
 
 	response, err := client.ConfirmUpload(ctx, &uploadv1.ConfirmUploadRequest{})
 	if err != nil || !response.Ok {
