@@ -33,6 +33,17 @@ type fakePresigner struct {
 	chainID  int
 }
 
+type fakeTokenCreator struct {
+	request tokencreation.Request
+	token   string
+}
+
+func (f *fakeTokenCreator) Create(ctx context.Context, request tokencreation.Request) (tokencreation.Response, error) {
+	f.request = request
+	f.token, _ = auth.BearerTokenFromContext(ctx)
+	return tokencreation.Response{Data: "0xdata", Signature: "0xsignature"}, nil
+}
+
 func (s *fakeCreationStore) Create(_ context.Context, value repository.TokenCreationRequest) error {
 	s.value = value
 	return nil
@@ -121,6 +132,27 @@ func TestCreateTokenUsesAuthenticatedWalletAsCreator(t *testing.T) {
 	}
 	if response["signature"] == "" || response["createArg"] == "" {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestCreateTokenCarriesBearerTokenToCreator(t *testing.T) {
+	authService := auth.New(nil, "test-secret", auth.SIWEConfig{})
+	creator := &fakeTokenCreator{}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{Address: "0x3333333333333333333333333333333333333333"}).SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/token/create", strings.NewReader(`{"name":"Meme","symbol":"MEME"}`))
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+
+	NewHandler("test", authService, nil, creator, nil).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body)
+	}
+	if creator.token != token || creator.request.Creator != common.HexToAddress("0x3333333333333333333333333333333333333333") {
+		t.Fatalf("token forwarded = %t, request = %+v", creator.token == token, creator.request)
 	}
 }
 

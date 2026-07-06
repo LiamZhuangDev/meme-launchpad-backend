@@ -23,11 +23,15 @@ type TokenReader interface {
 	FindByAddress(context.Context, string) (repository.Token, error)
 }
 
+type TokenCreator interface {
+	Create(context.Context, tokencreation.Request) (tokencreation.Response, error)
+}
+
 type Presigner interface {
 	Presign(folder, mimeType string, chainID int) (upload.PresignResult, error)
 }
 
-func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader, creation *tokencreation.Service, uploads Presigner) http.Handler {
+func NewHandler(serviceName string, authService *auth.Service, tokens TokenReader, creation TokenCreator, uploads Presigner) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", health(serviceName))
 	if tokens != nil {
@@ -95,7 +99,7 @@ func uploadConfirm(authService *auth.Service) http.HandlerFunc {
 	}
 }
 
-func createToken(authService *auth.Service, creation *tokencreation.Service) http.HandlerFunc {
+func createToken(authService *auth.Service, creation TokenCreator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -117,7 +121,9 @@ func createToken(authService *auth.Service, creation *tokencreation.Service) htt
 			writeError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		result, err := creation.Create(r.Context(), tokencreation.Request{Name: request.Name, Symbol: request.Symbol, Creator: common.HexToAddress(claims.Address), LaunchTime: request.LaunchTime, InitialBuyPercentage: request.InitialBuyPercentage})
+		rawToken := r.Header.Get("Authorization")[len("Bearer "):]
+		ctx := auth.WithBearerToken(r.Context(), rawToken)
+		result, err := creation.Create(ctx, tokencreation.Request{Name: request.Name, Symbol: request.Symbol, Creator: common.HexToAddress(claims.Address), LaunchTime: request.LaunchTime, InitialBuyPercentage: request.InitialBuyPercentage})
 		if err != nil {
 			writeError(w, err.Error(), http.StatusBadRequest)
 			return

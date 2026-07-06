@@ -30,7 +30,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 12.2 — REST-to-gRPC token reader adapter
 - [x] Step 12.3 — switch REST token reads and remove duplicate ownership
 - [x] Step 13.1 — standalone internal token-creation gRPC service
-- [ ] Step 13.2 — REST-to-gRPC token-creation adapter
+- [x] Step 13.2 — REST-to-gRPC token-creation adapter
 - [ ] Step 13.3 — switch REST token creation and remove duplicate ownership
 
 ## Step 1: run the foundation
@@ -1123,3 +1123,33 @@ go run ./cmd/token-creation-service
 
 Step 13.2 will add a client adapter for the existing REST token-creation
 handler without cutting it over yet.
+
+## Step 13.2: REST-to-gRPC token-creation adapter
+
+The REST transport now owns a small `TokenCreator` interface instead of
+depending directly on `*tokencreation.Service`. Both the local signing service
+and the new `grpcclient.TokenCreator` satisfy it:
+
+```text
+REST TokenCreator interface
+  -> grpcclient.TokenCreator
+  -> generated TokenCreationServiceClient
+  -> standalone token-creation service :39200
+```
+
+Token creation is authenticated at both boundaries. After REST validates the
+browser JWT, it places that raw token in the request context. The adapter sends
+it as outgoing `authorization: Bearer <JWT>` gRPC metadata, and the standalone
+handler validates it again using the shared `JWT_SECRET`. The Protobuf request
+does not contain a creator address; the internal handler derives the creator
+from the verified JWT to prevent caller impersonation.
+
+The adapter maps the existing domain request fields into
+`CreateTokenRequest`, then maps the signed intent response back into the same
+JSON-shaped `tokencreation.Response` used by REST today. RPC errors remain
+wrapped so their gRPC status can still be inspected.
+
+This checkpoint does not open a `:39200` connection from `cmd/api` and does not
+switch the REST route. Step 13.3 will add that managed connection, verify the
+`meme-token-creation-service` health identity, cut REST over, and remove token
+creation from the API's own `:39090` gRPC listener.
