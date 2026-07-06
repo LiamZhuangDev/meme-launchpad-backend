@@ -31,7 +31,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 12.3 — switch REST token reads and remove duplicate ownership
 - [x] Step 13.1 — standalone internal token-creation gRPC service
 - [x] Step 13.2 — REST-to-gRPC token-creation adapter
-- [ ] Step 13.3 — switch REST token creation and remove duplicate ownership
+- [x] Step 13.3 — switch REST token creation and remove duplicate ownership
 
 ## Step 1: run the foundation
 
@@ -1001,6 +1001,8 @@ go run ./cmd/api
 This project does not include a Docker Compose file. On the first run, create
 the PostgreSQL container with the `docker run` command in Step 3 instead of
 `docker start`, then apply the migrations before starting the two Go processes.
+After completing Step 13.3, also start `cmd/token-creation-service` before the
+API; the final four-process run order is documented there.
 
 Then the existing browser-facing request crosses the new internal boundary:
 
@@ -1153,3 +1155,83 @@ This checkpoint does not open a `:39200` connection from `cmd/api` and does not
 switch the REST route. Step 13.3 will add that managed connection, verify the
 `meme-token-creation-service` health identity, cut REST over, and remove token
 creation from the API's own `:39090` gRPC listener.
+
+## Step 13.3: route REST token creation through internal gRPC
+
+The API composition root now opens and owns a second internal gRPC connection.
+The unchanged browser-facing route crosses the token-creation service boundary:
+
+```text
+Browser
+  -> POST /api/v1/token/create on REST :38081
+  -> httpapi TokenCreator interface
+  -> grpcclient.TokenCreator
+  -> TokenCreationService gRPC :39200
+  -> tokencreation.Service
+  -> TokenCreationRepository
+  -> PostgreSQL
+```
+
+`cmd/api` no longer constructs `tokencreation.Service`, loads the signing key,
+or writes token-creation requests directly. It also no longer registers
+`meme.tokencreation.v1.TokenCreationService` on its own `:39090` listener.
+Only `cmd/token-creation-service` owns that business logic and the
+`TOKEN_CREATION_*` contract configuration.
+
+Run the complete local process set in this order:
+
+```bash
+# Terminal 1
+docker start meme-launchpad-postgres
+
+# Terminal 2: token reads
+go run ./cmd/token-service
+
+# Terminal 3: token creation; include the Step 13.1 JWT and contract variables
+JWT_SECRET='shared-secret' \
+TOKEN_CREATION_CHAIN_ID='97' \
+TOKEN_CREATION_CORE='0xYourMemeCoreAddress' \
+TOKEN_CREATION_FACTORY='0xYourMemeFactoryAddress' \
+TOKEN_CREATION_SIGNER_KEY='your-signer-private-key' \
+TOKEN_CREATION_BYTECODE='0xYourCompiledTokenCreationBytecode' \
+go run ./cmd/token-creation-service
+
+# Terminal 4: public REST API; JWT_SECRET must match Terminal 3
+JWT_SECRET='shared-secret' go run ./cmd/api
+```
+
+The API verifies both internal health identities during startup:
+
+```text
+127.0.0.1:39100 -> meme-token-service
+127.0.0.1:39200 -> meme-token-creation-service
+```
+
+For mTLS, the token-creation process uses the `GRPC_TLS_*` server variables
+shown in Step 13.1. Configure the API's separate client role with all four of
+these variables:
+
+| API environment variable | Purpose |
+| --- | --- |
+| `TOKEN_CREATION_SERVICE_GRPC_CA_FILE` | CA that issued the token-creation server certificate |
+| `TOKEN_CREATION_SERVICE_GRPC_CERT_FILE` | API's client certificate |
+| `TOKEN_CREATION_SERVICE_GRPC_KEY_FILE` | API's client private key |
+| `TOKEN_CREATION_SERVICE_GRPC_SERVER_NAME` | Expected token-creation server DNS identity |
+
+The development certificates can be reused for both outbound connections:
+
+```bash
+JWT_SECRET='shared-secret' \
+TOKEN_SERVICE_GRPC_CA_FILE=.local-certs/ca.crt \
+TOKEN_SERVICE_GRPC_CERT_FILE=.local-certs/internal-client.crt \
+TOKEN_SERVICE_GRPC_KEY_FILE=.local-certs/internal-client.key \
+TOKEN_SERVICE_GRPC_SERVER_NAME=localhost \
+TOKEN_CREATION_SERVICE_GRPC_CA_FILE=.local-certs/ca.crt \
+TOKEN_CREATION_SERVICE_GRPC_CERT_FILE=.local-certs/internal-client.crt \
+TOKEN_CREATION_SERVICE_GRPC_KEY_FILE=.local-certs/internal-client.key \
+TOKEN_CREATION_SERVICE_GRPC_SERVER_NAME=localhost \
+go run ./cmd/api
+```
+
+Both internal connections are closed during API shutdown. A non-loopback
+target is rejected unless its complete client mTLS configuration is present.

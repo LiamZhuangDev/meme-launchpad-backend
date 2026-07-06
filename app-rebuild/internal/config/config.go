@@ -68,6 +68,7 @@ type TokenServiceConfig struct {
 type TokenCreationServiceConfig struct {
 	Host string
 	Port int
+	TLS  GRPCClientTLSConfig
 }
 
 type GRPCClientTLSConfig struct {
@@ -234,6 +235,18 @@ func Load(lookup LookupEnv) (Config, error) {
 	if value, ok := lookup("TOKEN_SERVICE_GRPC_SERVER_NAME"); ok && value != "" {
 		config.TokenService.TLS.ServerName = value
 	}
+	if value, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_CA_FILE"); ok && value != "" {
+		config.TokenCreationService.TLS.CAFile = value
+	}
+	if value, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_CERT_FILE"); ok && value != "" {
+		config.TokenCreationService.TLS.CertFile = value
+	}
+	if value, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_KEY_FILE"); ok && value != "" {
+		config.TokenCreationService.TLS.KeyFile = value
+	}
+	if value, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_SERVER_NAME"); ok && value != "" {
+		config.TokenCreationService.TLS.ServerName = value
+	}
 	if value, ok := lookup("GRPC_TLS_CERT_FILE"); ok && value != "" {
 		config.GRPC.TLS.CertFile = value
 	}
@@ -253,7 +266,10 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err := config.GRPC.TLS.Validate(); err != nil {
 		return Config{}, err
 	}
-	if err := config.TokenService.TLS.Validate(); err != nil {
+	if err := config.TokenService.TLS.Validate("TOKEN_SERVICE_GRPC"); err != nil {
+		return Config{}, err
+	}
+	if err := config.TokenCreationService.TLS.Validate("TOKEN_CREATION_SERVICE_GRPC"); err != nil {
 		return Config{}, err
 	}
 	if !config.GRPC.TLS.Enabled() && !loopbackHost(config.GRPC.Host) {
@@ -358,7 +374,7 @@ func Load(lookup LookupEnv) (Config, error) {
 	return config, nil
 }
 
-func (c GRPCClientTLSConfig) Validate() error {
+func (c GRPCClientTLSConfig) Validate(environmentPrefix string) error {
 	configured := 0
 	for _, value := range []string{c.CAFile, c.CertFile, c.KeyFile, c.ServerName} {
 		if value != "" {
@@ -366,7 +382,7 @@ func (c GRPCClientTLSConfig) Validate() error {
 		}
 	}
 	if configured != 0 && configured != 4 {
-		return fmt.Errorf("TOKEN_SERVICE_GRPC_CA_FILE, TOKEN_SERVICE_GRPC_CERT_FILE, TOKEN_SERVICE_GRPC_KEY_FILE, and TOKEN_SERVICE_GRPC_SERVER_NAME must be set together")
+		return fmt.Errorf("%s_CA_FILE, %s_CERT_FILE, %s_KEY_FILE, and %s_SERVER_NAME must be set together", environmentPrefix, environmentPrefix, environmentPrefix, environmentPrefix)
 	}
 	return nil
 }

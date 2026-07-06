@@ -39,32 +39,36 @@ func TestLoadUsesDefaults(t *testing.T) {
 
 func TestLoadReadsEnvironment(t *testing.T) {
 	values := map[string]string{
-		"APP_NAME":                         "local-api",
-		"HTTP_HOST":                        "192.0.2.10",
-		"HTTP_PORT":                        "48080",
-		"GRPC_HOST":                        "10.0.0.10",
-		"GRPC_PORT":                        "49090",
-		"TOKEN_SERVICE_GRPC_HOST":          "10.0.0.11",
-		"TOKEN_SERVICE_GRPC_PORT":          "49100",
-		"TOKEN_CREATION_SERVICE_GRPC_HOST": "10.0.0.12",
-		"TOKEN_CREATION_SERVICE_GRPC_PORT": "49200",
-		"TOKEN_SERVICE_GRPC_CA_FILE":       "/certs/ca.crt",
-		"TOKEN_SERVICE_GRPC_CERT_FILE":     "/certs/api-client.crt",
-		"TOKEN_SERVICE_GRPC_KEY_FILE":      "/certs/api-client.key",
-		"TOKEN_SERVICE_GRPC_SERVER_NAME":   "token-service",
-		"GRPC_TLS_CERT_FILE":               "/certs/server.crt",
-		"GRPC_TLS_KEY_FILE":                "/certs/server.key",
-		"GRPC_TLS_CLIENT_CA_FILE":          "/certs/ca.crt",
-		"GRPC_ALLOWED_CLIENT_IDS":          "spiffe://meme/client,worker",
-		"DATABASE_URL":                     "postgres://local/test",
-		"REDIS_ADDR":                       "localhost:6379",
-		"REDIS_PASSWORD":                   "secret",
-		"REDIS_DB":                         "2",
-		"COS_SECRET_ID":                    "cos-id",
-		"COS_SECRET_KEY":                   "cos-key",
-		"COS_BUCKET":                       "bucket",
-		"COS_REGION":                       "ap-guangzhou",
-		"COS_DOMAIN":                       "https://cdn.example",
+		"APP_NAME":                                "local-api",
+		"HTTP_HOST":                               "192.0.2.10",
+		"HTTP_PORT":                               "48080",
+		"GRPC_HOST":                               "10.0.0.10",
+		"GRPC_PORT":                               "49090",
+		"TOKEN_SERVICE_GRPC_HOST":                 "10.0.0.11",
+		"TOKEN_SERVICE_GRPC_PORT":                 "49100",
+		"TOKEN_CREATION_SERVICE_GRPC_HOST":        "10.0.0.12",
+		"TOKEN_CREATION_SERVICE_GRPC_PORT":        "49200",
+		"TOKEN_CREATION_SERVICE_GRPC_CA_FILE":     "/certs/ca.crt",
+		"TOKEN_CREATION_SERVICE_GRPC_CERT_FILE":   "/certs/api-client.crt",
+		"TOKEN_CREATION_SERVICE_GRPC_KEY_FILE":    "/certs/api-client.key",
+		"TOKEN_CREATION_SERVICE_GRPC_SERVER_NAME": "token-creation-service",
+		"TOKEN_SERVICE_GRPC_CA_FILE":              "/certs/ca.crt",
+		"TOKEN_SERVICE_GRPC_CERT_FILE":            "/certs/api-client.crt",
+		"TOKEN_SERVICE_GRPC_KEY_FILE":             "/certs/api-client.key",
+		"TOKEN_SERVICE_GRPC_SERVER_NAME":          "token-service",
+		"GRPC_TLS_CERT_FILE":                      "/certs/server.crt",
+		"GRPC_TLS_KEY_FILE":                       "/certs/server.key",
+		"GRPC_TLS_CLIENT_CA_FILE":                 "/certs/ca.crt",
+		"GRPC_ALLOWED_CLIENT_IDS":                 "spiffe://meme/client,worker",
+		"DATABASE_URL":                            "postgres://local/test",
+		"REDIS_ADDR":                              "localhost:6379",
+		"REDIS_PASSWORD":                          "secret",
+		"REDIS_DB":                                "2",
+		"COS_SECRET_ID":                           "cos-id",
+		"COS_SECRET_KEY":                          "cos-key",
+		"COS_BUCKET":                              "bucket",
+		"COS_REGION":                              "ap-guangzhou",
+		"COS_DOMAIN":                              "https://cdn.example",
 	}
 
 	config, err := Load(func(key string) (string, bool) {
@@ -83,6 +87,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if config.TokenCreationService.Address() != "10.0.0.12:49200" {
 		t.Fatalf("token creation service config = %+v", config.TokenCreationService)
+	}
+	if !config.TokenCreationService.TLS.Enabled() || config.TokenCreationService.TLS.ServerName != "token-creation-service" {
+		t.Fatalf("token creation service TLS config = %+v", config.TokenCreationService.TLS)
 	}
 	if !config.TokenService.TLS.Enabled() || config.TokenService.TLS.ServerName != "token-service" {
 		t.Fatalf("token service TLS config = %+v", config.TokenService.TLS)
@@ -155,6 +162,18 @@ func TestLoadRejectsPartialTokenServiceGRPCTLSConfig(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want partial token-service gRPC TLS config error")
+	}
+}
+
+func TestLoadRejectsPartialTokenCreationServiceGRPCTLSConfig(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "TOKEN_CREATION_SERVICE_GRPC_CA_FILE" {
+			return "/certs/ca.crt", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want partial token-creation service gRPC TLS config error")
 	}
 }
 
