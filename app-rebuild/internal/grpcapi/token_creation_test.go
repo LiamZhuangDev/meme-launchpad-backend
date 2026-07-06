@@ -27,13 +27,13 @@ func (f *fakeTokenCreator) Create(_ context.Context, request tokencreation.Reque
 func TestTokenCreationUsesAuthenticatedWallet(t *testing.T) {
 	const secret = "test-secret"
 	address := "0x3333333333333333333333333333333333333333"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
+	authenticator := auth.NewJWTVerifier(secret)
 	creator := &fakeTokenCreator{response: tokencreation.Response{
 		Data: "0xdata", Signature: "0xsignature", RequestID: "0xrequest",
 		Salt: "0xsalt", PredictedAddress: "0x4444444444444444444444444444444444444444",
 		Nonce: 12, Timestamp: 34,
 	}}
-	connection := testConnection(t, Dependencies{Auth: authenticator, TokenCreation: creator})
+	connection := testConnection(t, Dependencies{TokenCreationAuth: authenticator, TokenCreation: creator})
 	client := tokencreationv1.NewTokenCreationServiceClient(connection)
 
 	response, err := client.CreateToken(authenticatedContext(t, secret, address, 7), &tokencreationv1.CreateTokenRequest{
@@ -52,9 +52,9 @@ func TestTokenCreationUsesAuthenticatedWallet(t *testing.T) {
 
 func TestTokenCreationRequiresAuthenticationAndMapsValidationErrors(t *testing.T) {
 	const secret = "test-secret"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
+	authenticator := auth.NewJWTVerifier(secret)
 	creator := &fakeTokenCreator{err: errors.New("name, symbol, and creator are required")}
-	connection := testConnection(t, Dependencies{Auth: authenticator, TokenCreation: creator})
+	connection := testConnection(t, Dependencies{TokenCreationAuth: authenticator, TokenCreation: creator})
 	client := tokencreationv1.NewTokenCreationServiceClient(connection)
 
 	_, err := client.CreateToken(context.Background(), &tokencreationv1.CreateTokenRequest{})

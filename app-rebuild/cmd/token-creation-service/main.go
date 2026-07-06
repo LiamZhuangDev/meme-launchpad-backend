@@ -59,11 +59,9 @@ func main() {
 		log.Fatal("mutual TLS is required when TOKEN_CREATION_SERVICE_GRPC_HOST is not loopback")
 	}
 
-	// This auth service is used only as a JWT parser. AuthService RPCs are not
-	// registered by this process.
-	tokenParser := auth.New(nil, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE))
+	tokenVerifier := auth.NewJWTVerifier(cfg.Auth.JWTSecret)
 	server := grpcapi.NewServer(serviceName, grpcapi.Dependencies{
-		TokenCreationAuth: tokenParser,
+		TokenCreationAuth: tokenVerifier,
 		TokenCreation:     creator,
 	}, options...)
 	listener, err := net.Listen("tcp", cfg.TokenCreationService.Address())

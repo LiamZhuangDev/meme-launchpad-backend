@@ -39,10 +39,9 @@ func main() {
 		log.Fatal("mutual TLS is required when UPLOAD_SERVICE_GRPC_HOST is not loopback")
 	}
 
-	// This auth service is only a JWT parser; AuthService RPCs are not exposed.
-	tokenParser := auth.New(nil, cfg.Auth.JWTSecret, auth.SIWEConfig(cfg.Auth.SIWE))
+	tokenVerifier := auth.NewJWTVerifier(cfg.Auth.JWTSecret)
 	server := grpcapi.NewServer(serviceName, grpcapi.Dependencies{
-		UploadAuth: tokenParser,
+		UploadAuth: tokenVerifier,
 		Uploads:    uploads,
 	}, options...)
 	listener, err := net.Listen("tcp", cfg.UploadService.Address())

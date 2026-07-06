@@ -36,6 +36,7 @@ The original backend is not imported or modified by this project.
 - [x] Step 14.2 — REST-to-gRPC upload adapter
 - [x] Step 14.3 — switch REST uploads and remove duplicate ownership
 - [x] Step 15 — remove the API-owned gRPC listener
+- [x] Step 16 — separate JWT verification from the SIWE auth service
 
 ## Step 1: run the foundation
 
@@ -1447,3 +1448,31 @@ The `grpcapi` package is intentionally retained: its token, token-creation,
 and upload handlers receive requests inside the standalone gRPC processes.
 Auth code is also retained for REST and for JWT parsing in protected internal
 services, but auth is no longer exposed through an API-owned gRPC listener.
+
+## Step 16: dedicated JWT verifier
+
+Protected standalone services no longer construct a partially initialized
+`auth.Service` with a nil user repository. They use the narrower component:
+
+```go
+tokenVerifier := auth.NewJWTVerifier(cfg.Auth.JWTSecret)
+```
+
+`JWTVerifier` implements only `ParseToken`. It has no SIWE configuration,
+challenge store, or user repository, so the token-creation and upload processes
+cannot accidentally call login or user-creation behavior. The REST API keeps
+the complete `auth.Service`, which delegates token parsing to the same verifier
+while retaining SIWE, JWT issuance, Redis challenges, and PostgreSQL users.
+
+```text
+REST API auth.Service
+  -> issue JWT
+  -> JWTVerifier.ParseToken for local validation
+
+token-creation/upload services
+  -> JWTVerifier.ParseToken only
+```
+
+This checkpoint preserves the existing shared HS256 `JWT_SECRET`. A future
+security step can replace it with asymmetric signing so only the auth API holds
+the private signing key and internal services receive verification keys.

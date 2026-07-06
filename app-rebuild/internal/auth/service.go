@@ -82,10 +82,11 @@ func (c SIWEChallenge) Message() string {
 }
 
 type Service struct {
-	users  UserStore
-	secret []byte
-	siwe   SIWEConfig
-	store  ChallengeStore
+	users    UserStore
+	secret   []byte
+	verifier *JWTVerifier
+	siwe     SIWEConfig
+	store    ChallengeStore
 }
 
 func New(users UserStore, jwtSecret string, siwe SIWEConfig) *Service {
@@ -96,7 +97,7 @@ func NewWithChallengeStore(users UserStore, jwtSecret string, siwe SIWEConfig, s
 	if store == nil {
 		store = NewMemoryChallengeStore()
 	}
-	return &Service{users: users, secret: []byte(jwtSecret), siwe: siwe, store: store}
+	return &Service{users: users, secret: []byte(jwtSecret), verifier: NewJWTVerifier(jwtSecret), siwe: siwe, store: store}
 }
 
 func (s *Service) RequestMessage(ctx context.Context, address string) (SignMessage, error) {
@@ -155,17 +156,7 @@ func (s *Service) Login(ctx context.Context, address, signature string) (LoginRe
 }
 
 func (s *Service) ParseToken(raw string) (Claims, error) {
-	claims := Claims{}
-	token, err := jwt.ParseWithClaims(raw, &claims, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.secret, nil
-	})
-	if err != nil || !token.Valid {
-		return Claims{}, errors.New("invalid or expired token")
-	}
-	return claims, nil
+	return s.verifier.ParseToken(raw)
 }
 
 func (s *Service) getChallenge(ctx context.Context, address string) (SIWEChallenge, error) {

@@ -66,7 +66,7 @@ func TestServerRegistersEveryParallelApplicationService(t *testing.T) {
 }
 
 func TestServerCanExposeTokenCreationWithoutAuthRPCs(t *testing.T) {
-	parser := auth.New(nil, "test-secret", auth.SIWEConfig{})
+	parser := auth.NewJWTVerifier("test-secret")
 	server := NewServer("token-creation-service", Dependencies{
 		TokenCreationAuth: parser,
 		TokenCreation:     &fakeTokenCreator{},
@@ -83,7 +83,7 @@ func TestServerCanExposeTokenCreationWithoutAuthRPCs(t *testing.T) {
 }
 
 func TestServerCanExposeUploadWithoutAuthRPCs(t *testing.T) {
-	parser := auth.New(nil, "test-secret", auth.SIWEConfig{})
+	parser := auth.NewJWTVerifier("test-secret")
 	server := NewServer("upload-service", Dependencies{
 		UploadAuth: parser,
 		Uploads:    &fakeUploadPresigner{},

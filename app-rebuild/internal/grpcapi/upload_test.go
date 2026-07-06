@@ -29,9 +29,9 @@ func (f *fakeUploadPresigner) Confirm(context.Context) error { return nil }
 
 func TestUploadPresignMapsImageKindAndRequiresAuthentication(t *testing.T) {
 	const secret = "test-secret"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
+	authenticator := auth.NewJWTVerifier(secret)
 	uploads := &fakeUploadPresigner{}
-	connection := testConnection(t, Dependencies{Auth: authenticator, Uploads: uploads})
+	connection := testConnection(t, Dependencies{UploadAuth: authenticator, Uploads: uploads})
 	client := uploadv1.NewUploadServiceClient(connection)
 	chainID := int32(56)
 	request := &uploadv1.PresignImageRequest{
@@ -57,8 +57,8 @@ func TestUploadPresignMapsImageKindAndRequiresAuthentication(t *testing.T) {
 
 func TestUploadConfirmIsAuthenticatedPlaceholder(t *testing.T) {
 	const secret = "test-secret"
-	authenticator := auth.New(nil, secret, auth.SIWEConfig{})
-	connection := testConnection(t, Dependencies{Auth: authenticator, Uploads: &fakeUploadPresigner{}})
+	authenticator := auth.NewJWTVerifier(secret)
+	connection := testConnection(t, Dependencies{UploadAuth: authenticator, Uploads: &fakeUploadPresigner{}})
 	client := uploadv1.NewUploadServiceClient(connection)
 	ctx := authenticatedContext(t, secret, "0x3333333333333333333333333333333333333333", 7)
 
