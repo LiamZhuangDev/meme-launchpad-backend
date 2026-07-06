@@ -81,3 +81,20 @@ func TestServerCanExposeTokenCreationWithoutAuthRPCs(t *testing.T) {
 		t.Fatal("standalone token-creation server must not expose auth RPCs")
 	}
 }
+
+func TestServerCanExposeUploadWithoutAuthRPCs(t *testing.T) {
+	parser := auth.New(nil, "test-secret", auth.SIWEConfig{})
+	server := NewServer("upload-service", Dependencies{
+		UploadAuth: parser,
+		Uploads:    &fakeUploadPresigner{},
+	})
+	t.Cleanup(server.Stop)
+
+	services := server.GetServiceInfo()
+	if _, ok := services["meme.upload.v1.UploadService"]; !ok {
+		t.Fatal("upload gRPC service is not registered")
+	}
+	if _, ok := services["meme.auth.v1.AuthService"]; ok {
+		t.Fatal("standalone upload server must not expose auth RPCs")
+	}
+}

@@ -32,6 +32,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.TokenCreationService.Address() != "127.0.0.1:39200" {
 		t.Fatalf("TokenCreationService.Address() = %q", config.TokenCreationService.Address())
 	}
+	if config.UploadService.Address() != "127.0.0.1:39300" {
+		t.Fatalf("UploadService.Address() = %q", config.UploadService.Address())
+	}
 	if config.Database.URL != defaultDatabaseURL {
 		t.Fatalf("Database.URL = %q, want %q", config.Database.URL, defaultDatabaseURL)
 	}
@@ -48,6 +51,8 @@ func TestLoadReadsEnvironment(t *testing.T) {
 		"TOKEN_SERVICE_GRPC_PORT":                 "49100",
 		"TOKEN_CREATION_SERVICE_GRPC_HOST":        "10.0.0.12",
 		"TOKEN_CREATION_SERVICE_GRPC_PORT":        "49200",
+		"UPLOAD_SERVICE_GRPC_HOST":                "10.0.0.13",
+		"UPLOAD_SERVICE_GRPC_PORT":                "49300",
 		"TOKEN_CREATION_SERVICE_GRPC_CA_FILE":     "/certs/ca.crt",
 		"TOKEN_CREATION_SERVICE_GRPC_CERT_FILE":   "/certs/api-client.crt",
 		"TOKEN_CREATION_SERVICE_GRPC_KEY_FILE":    "/certs/api-client.key",
@@ -87,6 +92,9 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 	if config.TokenCreationService.Address() != "10.0.0.12:49200" {
 		t.Fatalf("token creation service config = %+v", config.TokenCreationService)
+	}
+	if config.UploadService.Address() != "10.0.0.13:49300" {
+		t.Fatalf("upload service config = %+v", config.UploadService)
 	}
 	if !config.TokenCreationService.TLS.Enabled() || config.TokenCreationService.TLS.ServerName != "token-creation-service" {
 		t.Fatalf("token creation service TLS config = %+v", config.TokenCreationService.TLS)
@@ -150,6 +158,18 @@ func TestLoadRejectsInvalidTokenCreationServiceGRPCPort(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Load() error = nil, want invalid token-creation service gRPC port error")
+	}
+}
+
+func TestLoadRejectsInvalidUploadServiceGRPCPort(t *testing.T) {
+	_, err := Load(func(key string) (string, bool) {
+		if key == "UPLOAD_SERVICE_GRPC_PORT" {
+			return "70000", true
+		}
+		return "", false
+	})
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid upload service gRPC port error")
 	}
 }
 

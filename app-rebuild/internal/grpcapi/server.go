@@ -16,6 +16,7 @@ type Dependencies struct {
 	Auth              Authenticator
 	TokenCreationAuth TokenParser
 	TokenCreation     TokenCreator
+	UploadAuth        TokenParser
 	Uploads           UploadPresigner
 }
 
@@ -32,9 +33,6 @@ func NewServer(serviceName string, dependencies Dependencies, options ...grpc.Se
 	}
 	if dependencies.Auth != nil {
 		registerAuthService(server, dependencies.Auth)
-		if dependencies.Uploads != nil {
-			registerUploadService(server, dependencies.Auth, dependencies.Uploads)
-		}
 	}
 	tokenCreationAuth := dependencies.TokenCreationAuth
 	if tokenCreationAuth == nil {
@@ -42,6 +40,13 @@ func NewServer(serviceName string, dependencies Dependencies, options ...grpc.Se
 	}
 	if tokenCreationAuth != nil && dependencies.TokenCreation != nil {
 		registerTokenCreationService(server, tokenCreationAuth, dependencies.TokenCreation)
+	}
+	uploadAuth := dependencies.UploadAuth
+	if uploadAuth == nil {
+		uploadAuth = dependencies.Auth
+	}
+	if uploadAuth != nil && dependencies.Uploads != nil {
+		registerUploadService(server, uploadAuth, dependencies.Uploads)
 	}
 	reflection.Register(server)
 	return server

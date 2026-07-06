@@ -32,6 +32,9 @@ The original backend is not imported or modified by this project.
 - [x] Step 13.1 — standalone internal token-creation gRPC service
 - [x] Step 13.2 — REST-to-gRPC token-creation adapter
 - [x] Step 13.3 — switch REST token creation and remove duplicate ownership
+- [x] Step 14.1 — standalone internal upload gRPC service
+- [ ] Step 14.2 — REST-to-gRPC upload adapter
+- [ ] Step 14.3 — switch REST uploads and remove duplicate ownership
 
 ## Step 1: run the foundation
 
@@ -1235,3 +1238,62 @@ go run ./cmd/api
 
 Both internal connections are closed during API shutdown. A non-loopback
 target is rejected unless its complete client mTLS configuration is present.
+
+## Step 14.1: standalone upload gRPC service
+
+Presigned upload URL creation now has an independently runnable process:
+
+```text
+cmd/upload-service :39300
+  -> JWT bearer verification
+  -> UploadService gRPC handler
+  -> upload.Service
+  -> signed COS PUT URL
+```
+
+This checkpoint leaves the REST upload routes unchanged. The API still calls
+its local upload service and continues exposing the parallel upload gRPC
+handler on `:39090` until Steps 14.2 and 14.3 complete the cutover.
+
+The standalone listener defaults are:
+
+| Environment variable | Default |
+| --- | --- |
+| `UPLOAD_SERVICE_GRPC_HOST` | `127.0.0.1` |
+| `UPLOAD_SERVICE_GRPC_PORT` | `39300` |
+
+The process does not need PostgreSQL or Redis. It requires the same
+`JWT_SECRET` as the API plus the COS configuration documented in Step 9:
+
+```bash
+JWT_SECRET='shared-secret' \
+COS_SECRET_ID='replace-me' \
+COS_SECRET_KEY='replace-me' \
+COS_BUCKET='your-bucket' \
+COS_REGION='ap-guangzhou' \
+go run ./cmd/upload-service
+```
+
+It registers health and `meme.upload.v1.UploadService` only. The auth component
+is used strictly as a JWT parser; SIWE and login RPCs are not exposed by this
+process. As before, the backend signs upload permission but never receives the
+image bytes.
+
+For development mTLS, add the server credentials and allowed API client
+identity:
+
+```bash
+GRPC_TLS_CERT_FILE=.local-certs/server.crt \
+GRPC_TLS_KEY_FILE=.local-certs/server.key \
+GRPC_TLS_CLIENT_CA_FILE=.local-certs/ca.crt \
+GRPC_ALLOWED_CLIENT_IDS='spiffe://meme-launchpad/internal-client' \
+JWT_SECRET='shared-secret' \
+COS_SECRET_ID='replace-me' \
+COS_SECRET_KEY='replace-me' \
+COS_BUCKET='your-bucket' \
+COS_REGION='ap-guangzhou' \
+go run ./cmd/upload-service
+```
+
+Step 14.2 will add a REST-facing gRPC client adapter while keeping the local
+upload implementation wired as the rollback path.

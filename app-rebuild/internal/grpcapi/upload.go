@@ -18,11 +18,11 @@ type UploadPresigner interface {
 
 type uploadHandler struct {
 	uploadv1.UnimplementedUploadServiceServer
-	auth    Authenticator
+	auth    TokenParser
 	uploads UploadPresigner
 }
 
-func registerUploadService(server *grpc.Server, authenticator Authenticator, uploads UploadPresigner) {
+func registerUploadService(server *grpc.Server, authenticator TokenParser, uploads UploadPresigner) {
 	uploadv1.RegisterUploadServiceServer(server, &uploadHandler{auth: authenticator, uploads: uploads})
 }
 

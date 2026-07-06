@@ -22,6 +22,8 @@ const (
 	defaultTokenServicePort         = 39100
 	defaultTokenCreationServiceHost = "127.0.0.1"
 	defaultTokenCreationServicePort = 39200
+	defaultUploadServiceHost        = "127.0.0.1"
+	defaultUploadServicePort        = 39300
 	defaultDatabaseURL              = "postgres://postgres:postgres@localhost:5432/meme_launchpad?sslmode=disable"
 )
 
@@ -33,6 +35,7 @@ type Config struct {
 	GRPC                 GRPCConfig
 	TokenService         TokenServiceConfig
 	TokenCreationService TokenCreationServiceConfig
+	UploadService        UploadServiceConfig
 	Database             DatabaseConfig
 	Redis                RedisConfig
 	Auth                 AuthConfig
@@ -71,6 +74,11 @@ type TokenCreationServiceConfig struct {
 	TLS  GRPCClientTLSConfig
 }
 
+type UploadServiceConfig struct {
+	Host string
+	Port int
+}
+
 type GRPCClientTLSConfig struct {
 	CAFile     string
 	CertFile   string
@@ -89,6 +97,9 @@ func (c TokenServiceConfig) Address() string {
 	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
 func (c TokenCreationServiceConfig) Address() string {
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+func (c UploadServiceConfig) Address() string {
 	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
 
@@ -149,6 +160,7 @@ type LookupEnv func(string) (string, bool)
 // GRPC_HOST defaults to 127.0.0.1 and GRPC_PORT defaults to 39090.
 // TOKEN_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_SERVICE_GRPC_PORT defaults to 39100.
 // TOKEN_CREATION_SERVICE_GRPC_HOST defaults to 127.0.0.1 and TOKEN_CREATION_SERVICE_GRPC_PORT defaults to 39200.
+// UPLOAD_SERVICE_GRPC_HOST defaults to 127.0.0.1 and UPLOAD_SERVICE_GRPC_PORT defaults to 39300.
 // DATABASE_URL defaults to a local development PostgreSQL database.
 func Load(lookup LookupEnv) (Config, error) {
 	config := Config{
@@ -168,6 +180,10 @@ func Load(lookup LookupEnv) (Config, error) {
 		TokenCreationService: TokenCreationServiceConfig{
 			Host: defaultTokenCreationServiceHost,
 			Port: defaultTokenCreationServicePort,
+		},
+		UploadService: UploadServiceConfig{
+			Host: defaultUploadServiceHost,
+			Port: defaultUploadServicePort,
 		},
 		Database: DatabaseConfig{
 			URL: defaultDatabaseURL,
@@ -193,6 +209,9 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if host, ok := lookup("TOKEN_CREATION_SERVICE_GRPC_HOST"); ok && host != "" {
 		config.TokenCreationService.Host = host
+	}
+	if host, ok := lookup("UPLOAD_SERVICE_GRPC_HOST"); ok && host != "" {
+		config.UploadService.Host = host
 	}
 
 	if rawPort, ok := lookup("HTTP_PORT"); ok && rawPort != "" {
@@ -222,6 +241,13 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("TOKEN_CREATION_SERVICE_GRPC_PORT must be an integer from 1 to 65535")
 		}
 		config.TokenCreationService.Port = port
+	}
+	if rawPort, ok := lookup("UPLOAD_SERVICE_GRPC_PORT"); ok && rawPort != "" {
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return Config{}, fmt.Errorf("UPLOAD_SERVICE_GRPC_PORT must be an integer from 1 to 65535")
+		}
+		config.UploadService.Port = port
 	}
 	if value, ok := lookup("TOKEN_SERVICE_GRPC_CA_FILE"); ok && value != "" {
 		config.TokenService.TLS.CAFile = value
