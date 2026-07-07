@@ -39,6 +39,56 @@ The original backend is not imported or modified by this project.
 - [x] Step 16 — separate JWT verification from the SIWE auth service
 - [x] Step 17 — asymmetric Ed25519 JWT signing and verification
 
+# Data Flow
+```mermaid
+flowchart LR
+    Browser[Browser / Frontend]
+    BFF[REST BFF<br/>cmd/api :38081]
+
+    Browser -->|HTTP JSON| BFF
+
+    subgraph Auth["Authentication inside BFF"]
+        AuthService[auth.Service]
+        PrivateKey[Ed25519 JWT private key]
+        Challenges[(Redis / Memory<br/>SIWE challenges)]
+        Users[(PostgreSQL<br/>users)]
+    end
+
+    BFF --> AuthService
+    PrivateKey -->|sign JWT| AuthService
+    AuthService <--> Challenges
+    AuthService <--> Users
+    AuthService -->|EdDSA JWT| Browser
+
+    subgraph Internal["Standalone internal gRPC services"]
+        TokenRead[Token service<br/>:39100]
+        TokenCreate[Token-creation service<br/>:39200]
+        Upload[Upload service<br/>:39300]
+        PublicKey[Ed25519 JWT public key]
+    end
+
+    BFF -->|gRPC + mTLS| TokenRead
+    BFF -->|gRPC + JWT + mTLS| TokenCreate
+    BFF -->|gRPC + JWT + mTLS| Upload
+
+    PublicKey -->|verify JWT| TokenCreate
+    PublicKey -->|verify JWT| Upload
+
+    TokenRead --> TokenDB[(PostgreSQL<br/>tokens)]
+    TokenCreate --> CreationDB[(PostgreSQL<br/>creation requests)]
+
+    Upload -->|sign PUT permission| BFF
+    BFF -->|presigned URL| Browser
+    Browser -->|PUT image bytes directly| COS[Tencent COS]
+
+    TokenCreate -->|signed creation intent| BFF
+    BFF --> Browser
+    Browser -->|MEMECore.createToken transaction| Chain[Blockchain]
+
+    Chain -->|contract events| Indexer[Indexer]
+    Indexer --> TokenDB
+```
+
 ## Step 1: run the foundation
 
 ```bash
@@ -202,6 +252,8 @@ does not write token data or call a chain RPC during an HTTP request. Step 7
 will introduce the indexer that becomes the producer of this projection.
 
 ## Step 6: token-creation intent, CREATE2 prediction, and signing
+
+The backend ABI-encodes the token creation parameters, predicts the deterministic CREATE2 token address, signs the exact hash that the smart contract will verify, and returns the data plus signature to the client. It uses Ethereum primitives like CREATE2, ABI encoding, keccak256, and ECDSA.
 
 Apply the intent table migration:
 
